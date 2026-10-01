@@ -1,0 +1,48 @@
+format_version = 2
+
+[[package]]
+id = "ape.enhancement.play-as-jake"
+
+[[package]]
+id = "ape.enhancement.power-up-gadgets"
+
+[[package]]
+id = "psx.enhancement.cd-speed"
+
+[[package]]
+id = "psx.enhancement.fast-loading"
+
+[[feature]]
+package_id = "ape.enhancement.play-as-jake"
+id = "play-as-jake"
+enabled = true
+
+[[feature]]
+package_id = "ape.enhancement.power-up-gadgets"
+id = "boomerang-club"
+enabled = true
+
+[[feature]]
+package_id = "ape.enhancement.power-up-gadgets"
+id = "grapple-net"
+enabled = true
+
+[[feature]]
+package_id = "ape.enhancement.power-up-gadgets"
+id = "sky-flyer"
+enabled = true
+
+[[feature]]
+package_id = "ape.enhancement.power-up-gadgets"
+id = "smg"
+enabled = true
+
+[[feature]]
+package_id = "psx.enhancement.cd-speed"
+id = "cd-speed"
+enabled = false
+
+[[feature]]
+package_id = "psx.enhancement.fast-loading"
+id = "fast-loading"
+enabled = true
