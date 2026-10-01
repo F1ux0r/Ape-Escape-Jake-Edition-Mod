@@ -102,8 +102,18 @@ static uint32_t g_swapped[8];
 static uint32_t g_swapped_words[8][JAKE_MESH_WORDS];
 static int g_swapped_count;
 
-/* Jake's hair tail relative to his head. */
+/* Jake's hair tail relative to his head: live while he is in the level,
+ * else his usual pose (read off him in his race, the run's side-to-side
+ * sway centred): bone 16 turned 76 degrees to hang down the back of the
+ * head, 17 below it. */
+static const JakeAffine JAKE_TAIL_REST[2] = {
+    { { { 0.24f, 0.97f, 0.0f }, { -0.97f, 0.24f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+      { -19.0f, 0.0f, 0.0f } },
+    { { { -0.87f, 0.48f, 0.0f }, { -0.48f, -0.87f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+      { -8.5f, -40.5f, 0.0f } },
+};
 static JakeAffine g_tail_rel[2];
+static uint32_t g_tail_frame, g_frame;
 static uint8_t g_have_tail;
 
 /* ---- Disc -------------------------------------------------------------- */
@@ -377,15 +387,11 @@ static void jake_pose_tail(uint32_t matrices) {
     int k;
     jake_read_affine(jake_part_matrix(matrices, JAKE_HEAD_PART), &head);
     for (k = 0; k < 2; ++k) {
-        if (g_have_tail) {
+        /* Spike draws before Jake, so the live pose is a frame old. */
+        if (g_have_tail && g_frame - g_tail_frame <= 2u)
             jake_multiply(&head, &g_tail_rel[k], &tail);
-        } else {
-            /* Rest pose from Jake's part table: 16 at (-19, -1, 0) on the
-             * head, 17 at (43, 0, 0) on 16. */
-            const JakeAffine rest = { { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
-                                      { k == 0 ? -19.0f : 24.0f, -1.0f, 0.0f } };
-            jake_multiply(&head, &rest, &tail);
-        }
+        else
+            jake_multiply(&head, &JAKE_TAIL_REST[k], &tail);
         jake_write_affine(jake_part_matrix(matrices, JAKE_TAIL_PART + k), &tail);
     }
 }
@@ -401,6 +407,7 @@ static void jake_capture_tail(uint32_t matrices) {
         jake_multiply(&inv, &tail, &g_tail_rel[k]);
     }
     g_have_tail = 1u;
+    g_tail_frame = g_frame;
 }
 
 /* ---- Hooks ------------------------------------------------------------- */
@@ -483,6 +490,7 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
         for (k = 0; k < JAKE_MESH_WORDS; ++k)
             psx_mod_write_word(g_swapped[i] + (uint32_t)k * 4u, g_swapped_words[i][k]);
     g_swapped_count = 0;
+    ++g_frame;
 }
 
 /* Keep the face in VRAM (level loads may write over that strip). */
