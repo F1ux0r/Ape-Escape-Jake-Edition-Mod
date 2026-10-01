@@ -1,0 +1,23 @@
+format_version = 5
+id = "ape.enhancement.play-as-jake"
+version = "1.0.0"
+name = "Ape Escape Play as Jake"
+author = "dylan"
+description = "Play the whole game as Jake: Spike wears Jake's model everywhere, and Jake wears Spike's where he appears. Controls, animation and AI are unchanged. Jake's model is read from your own disc."
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "SCUS-94423"
+disc_sha256 = "1ae17e78ebb8c782c7c1785b0a0bd7b0ee28235b8a0c83c8df887129899a852a"
+
+[[feature]]
+id = "play-as-jake"
+name = "Play as Jake"
+description = "Spike wears Jake's model, read from your disc; Jake wears Spike's."
+group = "Visual"
+default_enabled = false
+
+[[plugin]]
+feature = "play-as-jake"
+id = "ape.characters.play-as-jake"
