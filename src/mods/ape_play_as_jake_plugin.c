@@ -1,6 +1,7 @@
 #include "cpu_state.h"
 #include "mod_plugins.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -82,6 +83,36 @@ enum {
     JAKE_MATRIX_SIZE = 0x20,
     JAKE_MATRIX_TRANSLATION = 20
 };
+
+/*
+ * Spike on the HUD. Each entry matches a sprite (texture page word, then a
+ * 0x64..0x67 sprite: colour, xy, clut<<16 | uv, size) by page, uv and
+ * palette and redraws it from new_uv, with a recoloured copy of the palette
+ * kept in free VRAM (clut_x/clut_y; 0 = keep the stock palette):
+ *  - L2 face (page 0x17): hair red -> Jake's purple.
+ *  - pause menu lives shirt (page 0x4F): red -> his navy.
+ *  - race map heads (page 0x26, palette 0x3F9B; Spike at uv F860, Jake at
+ *    F868): swapped like the bodies, Jake's blue hair made purple.
+ * The palettes the game loaded are left alone, so nothing else that shares
+ * them changes.
+ */
+typedef struct JakeHudIcon {
+    uint16_t tpage, uv, stock_clut, new_uv, clut_x, clut_y;
+    uint16_t palette[16];
+} JakeHudIcon;
+static const JakeHudIcon JAKE_HUD_ICONS[] = {
+    { 0x17u, 0x8060u, 0x7E1Du, 0x8060u, 976u, 255u, {
+      0x0000, 0xBDF0, 0x94C5, 0xBC68, 0xD8CD, 0xE931, 0xB21E, 0xBA7D,
+      0xE739, 0xA170, 0xB1F8, 0xC6BE, 0x8EFF, 0xD6B5, 0xF9F2, 0xFFFF } },
+    { 0x4Fu, 0x60C0u, 0x3AFFu, 0x60C0u, 992u, 255u, {
+      0x0000, 0x18A6, 0x1863, 0x24A5, 0x2CC6, 0x34E7, 0x4129, 0x6A6E,
+      0x7FBB, 0x4D6B, 0x72D5, 0x7B57, 0x8424, 0x1463, 0x61ED, 0x7FFF } },
+    { 0x26u, 0xF860u, 0x3F9Bu, 0xF868u, 976u, 254u, {
+      0x0000, 0x9CA4, 0xD8CD, 0xE931, 0x8C73, 0x801A, 0x801F, 0x931C,
+      0x9BFF, 0x9D92, 0xA218, 0xBEBB, 0xCF3F, 0xBC68, 0xFA15, 0xFFDE } },
+    { 0x26u, 0xF868u, 0x3F9Bu, 0xF860u, 0u, 0u, { 0 } },
+};
+enum { JAKE_HUD_ICON_COUNT = sizeof(JAKE_HUD_ICONS) / sizeof(JAKE_HUD_ICONS[0]) };
 
 typedef struct JakeAffine {
     float r[3][3];
@@ -346,6 +377,17 @@ static void jake_upload_face(uint32_t table) {
     for (k = 0; k < 16; k += 2)
         words[3 + k / 2] = g_face_clut[k] | ((uint32_t)g_face_clut[k + 1] << 16);
     jake_link_packet(far_entry, words, 3u + 8u);
+    for (row = 0; row < JAKE_HUD_ICON_COUNT; ++row) {
+        const JakeHudIcon* icon = &JAKE_HUD_ICONS[row];
+        if (icon->clut_x == 0u)
+            continue;
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)icon->clut_y << 16) | icon->clut_x;
+        words[2] = (1u << 16) | 16u;
+        for (k = 0; k < 16; k += 2)
+            words[3 + k / 2] = icon->palette[k] | ((uint32_t)icon->palette[k + 1] << 16);
+        jake_link_packet(far_entry, words, 3u + 8u);
+    }
     for (row = 0; row < JAKE_VRAM_H; row += ROWS) {
         words[0] = 0xA0000000u;
         words[1] = ((uint32_t)(JAKE_VRAM_Y + row) << 16) | JAKE_VRAM_X;
@@ -437,17 +479,167 @@ static int jake_inverse(const JakeAffine* a, JakeAffine* out) {
     return 1;
 }
 
+/*
+ * Without Jake in the level to copy from, the tail swings on a spring. Its
+ * tip direction u (head-local, unit) is pulled toward the rest direction
+ * and pushed back by the head's motion through the world: Spike's velocity
+ * and acceleration (actor position, s16 at +0x1C) and the head's own turn,
+ * which leaves u behind in the head's frame. Head-to-world is the camera
+ * matrix's inverse times the head matrix (both carry the screen's y scale,
+ * which cancels), so camera moves don't swing it. Both tail bones turn
+ * together about the tail root.
+ */
+static const uint32_t JAKE_CAMERA_MATRIX = 0x800E78C0u;
+static const float JAKE_TAIL_SPRING = 0.12f;     /* per frame^2 */
+static const float JAKE_TAIL_DAMPING = 0.22f;    /* per frame */
+static const float JAKE_TAIL_DRAG = 0.0022f;     /* per world unit/frame */
+static const float JAKE_TAIL_INERTIA = 0.0035f;  /* per world unit/frame^2 */
+static const float JAKE_TAIL_MAX_COS = 0.5f;     /* at most 60 degrees off rest */
+
+static struct {
+    uint8_t live;
+    uint32_t frame;
+    float u[3], du[3];          /* tip direction and its rate, head-local */
+    float world[3][3];          /* last head-to-world rotation */
+    float pos[3], vel[3];       /* Spike, world */
+} g_sway;
+
+static void jake_vec_normalize(float v[3]) {
+    const float n = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (n > 1e-6f) {
+        v[0] /= n, v[1] /= n, v[2] /= n;
+    }
+}
+
+/* r^T v */
+static void jake_mul_transposed(const float r[3][3], const float v[3], float out[3]) {
+    int i;
+    for (i = 0; i < 3; ++i)
+        out[i] = r[0][i] * v[0] + r[1][i] * v[1] + r[2][i] * v[2];
+}
+
+/* Rotation taking unit a onto unit b. */
+static void jake_rotation_between(const float a[3], const float b[3], float out[3][3]) {
+    float k[3] = { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                   a[0] * b[1] - a[1] * b[0] };
+    const float s = sqrtf(k[0] * k[0] + k[1] * k[1] + k[2] * k[2]);
+    const float c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const float t = 1.0f - c;
+    int i, j;
+    for (i = 0; i < 3; ++i)
+        for (j = 0; j < 3; ++j)
+            out[i][j] = i == j ? 1.0f : 0.0f;
+    if (s < 1e-6f)
+        return;
+    k[0] /= s, k[1] /= s, k[2] /= s;
+    for (i = 0; i < 3; ++i)
+        for (j = 0; j < 3; ++j)
+            out[i][j] = t * k[i] * k[j] + (i == j ? c : 0.0f);
+    out[1][2] -= s * k[0], out[2][1] += s * k[0];
+    out[2][0] -= s * k[1], out[0][2] += s * k[1];
+    out[0][1] -= s * k[2], out[1][0] += s * k[2];
+}
+
+static void jake_sway_tail(const JakeAffine* head, JakeAffine out[2]) {
+    JakeAffine camera, inverse, world;
+    float rest[3], pos[3], vel[3], acc[3], push[3], push_local[3], q[3][3];
+    int i, j, a, b, c;
+
+    for (i = 0; i < 3; ++i)
+        rest[i] = JAKE_TAIL_REST[1].t[i] - JAKE_TAIL_REST[0].t[i];
+    jake_vec_normalize(rest);
+    out[0] = JAKE_TAIL_REST[0], out[1] = JAKE_TAIL_REST[1];
+    jake_read_affine(JAKE_CAMERA_MATRIX, &camera);
+    if (!jake_inverse(&camera, &inverse)) {
+        g_sway.live = 0u;
+        return;
+    }
+    jake_multiply(&inverse, head, &world);
+    for (i = 0; i < 3; ++i) {      /* columns back to unit length */
+        float col[3] = { world.r[0][i], world.r[1][i], world.r[2][i] };
+        jake_vec_normalize(col);
+        world.r[0][i] = col[0], world.r[1][i] = col[1], world.r[2][i] = col[2];
+    }
+    for (i = 0; i < 3; ++i) {
+        pos[i] = (float)(int16_t)psx_mod_read_half(JAKE_SPIKE_OBJECT + 0x1Cu + (uint32_t)i * 2u);
+        vel[i] = pos[i] - g_sway.pos[i];
+    }
+    /* Level load, respawn, a long pause: start again from rest. */
+    if (!g_sway.live || g_frame - g_sway.frame > 3u ||
+        fabsf(vel[0]) + fabsf(vel[1]) + fabsf(vel[2]) > 400.0f) {
+        g_sway.live = 1u;
+        for (i = 0; i < 3; ++i) {
+            g_sway.u[i] = rest[i], g_sway.du[i] = 0.0f, g_sway.vel[i] = 0.0f;
+            vel[i] = 0.0f;
+        }
+    } else {
+        /* The head turned under the tail: carry u by the opposite turn. */
+        float w_u[3], w_du[3];
+        for (i = 0; i < 3; ++i) {
+            w_u[i] = 0.0f, w_du[i] = 0.0f;
+            for (j = 0; j < 3; ++j) {
+                w_u[i] += g_sway.world[i][j] * g_sway.u[j];
+                w_du[i] += g_sway.world[i][j] * g_sway.du[j];
+            }
+        }
+        jake_mul_transposed(world.r, w_u, g_sway.u);
+        jake_mul_transposed(world.r, w_du, g_sway.du);
+    }
+    for (i = 0; i < 3; ++i) {
+        acc[i] = vel[i] - g_sway.vel[i];
+        push[i] = -(JAKE_TAIL_DRAG * vel[i] + JAKE_TAIL_INERTIA * acc[i]);
+        g_sway.pos[i] = pos[i], g_sway.vel[i] = vel[i];
+    }
+    jake_mul_transposed(world.r, push, push_local);
+    for (i = 0; i < 3; ++i) {
+        g_sway.du[i] += JAKE_TAIL_SPRING * (rest[i] - g_sway.u[i]) -
+                        JAKE_TAIL_DAMPING * g_sway.du[i] + push_local[i];
+        g_sway.u[i] += g_sway.du[i];
+    }
+    jake_vec_normalize(g_sway.u);
+    if (g_sway.u[0] * rest[0] + g_sway.u[1] * rest[1] + g_sway.u[2] * rest[2] <
+        JAKE_TAIL_MAX_COS) {       /* keep it within reach of rest */
+        for (i = 0; i < 3; ++i) {
+            g_sway.u[i] = rest[i] + (g_sway.u[i] - rest[i]) * 0.9f;
+            g_sway.du[i] *= 0.5f;
+        }
+        jake_vec_normalize(g_sway.u);
+    }
+    for (i = 0; i < 3; ++i)
+        for (j = 0; j < 3; ++j)
+            g_sway.world[i][j] = world.r[i][j];
+    g_sway.frame = g_frame;
+
+    jake_rotation_between(rest, g_sway.u, q);
+    for (j = 0; j < 2; ++j) {
+        const JakeAffine* r = &JAKE_TAIL_REST[j];
+        float off[3];
+        for (a = 0; a < 3; ++a)
+            off[a] = r->t[a] - JAKE_TAIL_REST[0].t[a];
+        for (a = 0; a < 3; ++a) {
+            for (b = 0; b < 3; ++b) {
+                out[j].r[a][b] = 0.0f;
+                for (c = 0; c < 3; ++c)
+                    out[j].r[a][b] += q[a][c] * r->r[c][b];
+            }
+            out[j].t[a] = JAKE_TAIL_REST[0].t[a];
+            for (c = 0; c < 3; ++c)
+                out[j].t[a] += q[a][c] * off[c];
+        }
+    }
+}
+
 /* Spike's skeleton has no tail: pose Jake's on Spike's head. */
 static void jake_pose_tail(uint32_t matrices) {
-    JakeAffine head, tail;
+    JakeAffine head, tail, swayed[2];
+    /* Spike draws before Jake, so the live pose is a frame old. */
+    const int live = g_have_tail && g_frame - g_tail_frame <= 2u;
     int k;
     jake_read_affine(jake_part_matrix(matrices, JAKE_HEAD_PART), &head);
+    if (!live)
+        jake_sway_tail(&head, swayed);
     for (k = 0; k < 2; ++k) {
-        /* Spike draws before Jake, so the live pose is a frame old. */
-        if (g_have_tail && g_frame - g_tail_frame <= 2u)
-            jake_multiply(&head, &g_tail_rel[k], &tail);
-        else
-            jake_multiply(&head, &JAKE_TAIL_REST[k], &tail);
+        jake_multiply(&head, live ? &g_tail_rel[k] : &swayed[k], &tail);
         jake_write_affine(jake_part_matrix(matrices, JAKE_TAIL_PART + k), &tail);
     }
 }
@@ -538,6 +730,41 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
         jake_swap_in(object, g_spike_mesh);
 }
 
+/* Point Spike's HUD sprites (texture-page word, then a 0x64..0x67 sprite:
+ * colour, xy, clut<<16 | uv, size) at the recoloured palettes. The HUD list
+ * hangs off table + 0x4000 and is drawn after the main table. */
+static void jake_recolour_hud(uint32_t table) {
+    uint32_t at = psx_mod_read_word(table + 0x4000u) & 0x00FFFFFFu;
+    int packets;
+    for (packets = 0; packets < 512 && at != 0x00FFFFFFu && at != 0u; ++packets) {
+        const uint32_t addr = 0x80000000u | at;
+        const uint32_t tag = psx_mod_read_word(addr);
+        const uint32_t count = tag >> 24;
+        uint32_t k;
+        for (k = 1; k + 3 <= count; ++k) {
+            const uint32_t op = psx_mod_read_word(addr + 4u + k * 4u) >> 24;
+            const uint32_t page = psx_mod_read_word(addr + (k - 1u) * 4u + 4u);
+            uint32_t uv_word;
+            int i;
+            if (op < 0x64u || op > 0x67u || (page >> 24) != 0xE1u)
+                continue;
+            uv_word = psx_mod_read_word(addr + 4u + (k + 2u) * 4u);
+            for (i = 0; i < JAKE_HUD_ICON_COUNT; ++i) {
+                const JakeHudIcon* icon = &JAKE_HUD_ICONS[i];
+                if ((page & 0x1FFu) == icon->tpage && (uv_word & 0xFFFFu) == icon->uv &&
+                    (uv_word >> 16) == icon->stock_clut) {
+                    const uint32_t clut = icon->clut_x != 0u
+                        ? ((uint32_t)icon->clut_y << 6) | (icon->clut_x >> 4u)
+                        : icon->stock_clut;
+                    psx_mod_write_word(addr + 4u + (k + 2u) * 4u, (clut << 16) | icon->new_uv);
+                    break;   /* the swapped uv must not match the other entry */
+                }
+            }
+        }
+        at = tag & 0x00FFFFFFu;
+    }
+}
+
 /* The frame's drawing is queued: give every swapped object its own mesh
  * back before anything animates it again. */
 static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
@@ -556,6 +783,8 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
             g_arena_used = 0u;
             jake_upload_face(table);
         }
+        if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu)
+            jake_recolour_hud(table);
     }
     for (i = 0; i < g_swapped_count; ++i)
         for (k = 0; k < JAKE_MESH_WORDS; ++k)

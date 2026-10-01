@@ -101,3 +101,16 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   pressing the slingshot button again). While the SMG is powered: R3 masked out of pad 1 (0x800E52D2 bit 2,
   active low) at the pad-update hook, ammo held at 0; the pre-power-on choice is restored for 20 frames
   after power-down so that press's own cycle doesn't stick. Test: re/ammotest.py.
+
+## 2026-10-01 Jake: HUD icons + ponytail sway
+- HUD icons recoloured/swapped at DrawOTag by walking the HUD chain (table+0x4000) for sprites (E1 page word
+  then 0x64..0x67 sprite) matching page+uv+palette, and pointing them at our palettes uploaded with the face:
+  L2 face page 0x17 uv 8060 pal 0x7E1D -> purple hair, clut (976,255); lives shirt (pause menu) page 0x4F uv
+  60C0 pal 0x3AFF -> navy, clut (992,255); race map heads page 0x26 pal 0x3F9B, Spike uv F860 / Jake uv F868:
+  swapped, Jake's made purple, clut (976,254). Stock palettes untouched. Tools: re/hudwalk.py, hudicon.py,
+  otsprites.py.
+- Ponytail: where Jake isn't in the level the tail swings on a spring (head-local tip direction, pulled to rest,
+  pushed by Spike's world velocity/acceleration and carried against head turns; head-to-world = camera
+  0x800E78C0 inverse x head matrix, columns renormalised for the screen y scale). Race still copies Jake's live
+  tail. Test: re/tailtest.py.
+- Still open: in-engine cutscenes unchecked.
