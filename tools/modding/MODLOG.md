@@ -149,3 +149,9 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   15 ch6 sectors are delivered, then fades back (6 frames) to the game's value; 120-frame cap. Measured: mute
   40 ms before first CD audio, unmute after 0.73 s. Tools: re/xadec.py (XA -> wav from the .bin),
   outrocd.py (sector log), outromute.py (spu_status poll), outrocatch.py (catch on save slot 1 = menu 2).
+- CRASH FIX (savestate loads froze the game): the game runs with the SPU IRQ enabled (SPUCNT 0xC0C1, bit 6)
+  and IRQ address 0; setting the transfer address / FIFO writes are IRQ compares in the runtime, and restoring
+  DA6 to 0 after installing Jake's yell raised an unexpected SPU IRQ -> wedged in the exception handler
+  (freeze dump: in_exc=1, i_stat 0x200). Fix: don't restore DA6 (the game sets its own before each transfer)
+  and skip a slot the IRQ address points into. Stress test re/sstress.py: 20 loads of slots 9/10/1, 0 IRQ
+  events, game alive. Rule: never write SPU DA6/DA8 at an address matching DA4 while SPUCNT bit 6 is set.

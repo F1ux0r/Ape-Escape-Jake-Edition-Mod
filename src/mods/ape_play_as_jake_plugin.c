@@ -487,21 +487,35 @@ static void jake_build_voice(const uint8_t* disc) {
     }
 }
 
+/*
+ * The game runs with the SPU IRQ enabled (SPUCNT bit 6) and its address at
+ * 0, and setting the transfer address or writing through the FIFO is an IRQ
+ * compare: putting the transfer address back to 0 afterwards raised an SPU
+ * IRQ the game didn't expect, which wedged it in its interrupt handler
+ * (seen on savestate loads, which bring Spike's samples back). So the
+ * transfer address is left where we finish (the game sets its own before
+ * every transfer), and a slot the IRQ address points into is skipped.
+ */
+static const uint32_t SPU_CONTROL = 0x1F801DAAu;
+static const uint32_t SPU_IRQ_ADDRESS = 0x1F801DA4u;
+
 static void jake_install_voice(void) {
-    const uint16_t saved = psx_mod_read_half(SPU_TRANSFER_ADDRESS);
     int y;
     for (y = 0; y < JAKE_YELL_COUNT; ++y) {
         uint8_t head[sizeof(g_yells[y].head)];
+        const uint32_t irq = (uint32_t)psx_mod_read_half(SPU_IRQ_ADDRESS) << 3;
         uint32_t i;
         if (g_yells[y].jake_size == 0u ||
             spu_ram_peek(g_yells[y].spu, head, sizeof(head)) != sizeof(head) ||
             memcmp(head, g_yells[y].head, sizeof(head)) != 0)
             continue;
+        if ((psx_mod_read_half(SPU_CONTROL) & 0x0040u) &&
+            irq >= g_yells[y].spu && irq < g_yells[y].spu + g_yells[y].jake_size)
+            continue;
         psx_mod_write_half(SPU_TRANSFER_ADDRESS, (uint16_t)(g_yells[y].spu >> 3));
         for (i = 0; i < g_yells[y].jake_size; i += 2u)
             psx_mod_write_half(SPU_TRANSFER_FIFO,
                                (uint16_t)(g_yells[y].jake[i] | (g_yells[y].jake[i + 1u] << 8)));
-        psx_mod_write_half(SPU_TRANSFER_ADDRESS, saved);
     }
 }
 
