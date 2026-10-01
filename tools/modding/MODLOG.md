@@ -136,3 +136,8 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   try at y 128 overwrote unrelated texels), shirt page 0x4F -> (1008,96) 8 x 32. Arena raised to 0x2000.
 - Designs: modding/art/face_new.txt, shirt_new.txt (face_design.py / shirt_design.py preview, art.inc -> C).
   Note for publishing: the face's lower rows (eyes/mouth) are copied from the game's Spike icon.
+- Silenced Spike lines (silent block, flags 0x05, voice ends at once - END_STOP same frame): club spin 0x38560
+  (also plays on a catch), "Gotcha!" 0x36B30, hurt cry 0x3A420 (hurt state 0x1B). Spike voice bank is
+  contiguous: 0x36B30, 0x38560, 0x38F00, 0x39B40, 0x3A420...; disc offset = SPU addr + 0x120FF0. Catch also
+  plays 0x3F0E0 + jingle 0x2B230/0x18990 a second later (kept). Found with re/recorder.py while the user
+  played (logs non-music key-ons with Spike's state), spinsfx.py, stockcatch.py, netswing.py.

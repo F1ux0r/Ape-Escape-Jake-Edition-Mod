@@ -337,6 +337,11 @@ static void jake_load_disc(void) {
  * second, a slot that holds Spike's yell (a level load puts it back) gets
  * Jake's written over it through the SPU's manual transfer port; anything
  * else there is left alone.
+ *
+ * Spike's other lines Jake doesn't say are silenced the same way (a silent
+ * block that ends the voice at once): the club spin's "hyaa" (0x38560, which
+ * also plays on a catch), "Gotcha!" (0x36B30) and the hurt cry (0x3A420).
+ * These all sit in one bank, disc offset = SPU address + 0x120FF0.
  */
 uint32_t spu_ram_peek(uint32_t addr, uint8_t* out, uint32_t len);
 
@@ -354,12 +359,16 @@ static const uint32_t SPU_TRANSFER_FIFO = 0x1F801DA8u;
 
 static struct {
     uint32_t spu, size, disc;
+    uint8_t silent;                 /* 1: silence it rather than Jake's yell */
     uint8_t head[64];               /* Spike's first blocks, to recognise it */
     uint8_t jake[SPIKE_YELL_MAX_SIZE];
     uint32_t jake_size;
 } g_yells[] = {
-    { 0x38F00u, 0xC30u, 0x00159EF0u },   /* double jump */
-    { 0x39B40u, 0x8D0u, 0x0015AB30u },   /* Stun Club swing */
+    { 0x38F00u, 0xC30u, 0x00159EF0u, 0u },   /* double jump */
+    { 0x39B40u, 0x8D0u, 0x0015AB30u, 0u },   /* Stun Club swing */
+    { 0x38560u, 0x990u, 0x00159550u, 1u },   /* Stun Club spin, catch */
+    { 0x36B30u, 0x1A20u, 0x00157B20u, 1u },  /* "Gotcha!" */
+    { 0x3A420u, 0xD00u, 0x0015B410u, 1u },   /* hurt */
 };
 enum { JAKE_YELL_COUNT = sizeof(g_yells) / sizeof(g_yells[0]) };
 
@@ -452,6 +461,13 @@ static void jake_build_voice(const uint8_t* disc) {
     }
     for (y = 0; y < JAKE_YELL_COUNT; ++y) {
         const uint32_t room = g_yells[y].size / 16u - 1u;   /* after the lead-in */
+        if (g_yells[y].silent) {
+            /* lead-in, then one silent block flagged start + end */
+            memset(g_yells[y].jake, 0, 32);
+            g_yells[y].jake[17] = 0x05u;
+            g_yells[y].jake_size = 32u;
+            continue;
+        }
         const uint32_t blocks = full_blocks < room ? full_blocks : room;
         int s1 = 0, s2 = 0;
         memcpy(cut, resampled, blocks * 28u * sizeof(cut[0]));
