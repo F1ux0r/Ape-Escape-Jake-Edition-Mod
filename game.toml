@@ -25,8 +25,9 @@ strict = true
 # 0x80063628 = Spike move step (between velocity clamp and integration).
 # 0x80016A60 = model vertex transform (a0 = object; net parts from 0x80099324).
 # 0x8009AD60 = Slingback Shooter handler (draws it through 0x800E9E40).
+# 0x8002020C = glow beam (a0/a1 ends, a3 colour); the club's light halo.
 # 0x80028CC0 = DrawOTag (a0 = last ordering-table entry); grabber is linked in here.
-mod_function_entry_funcs = ["0x8009A800", "0x8009ABF4", "0x80064208", "0x80016A60", "0x80016B94", "0x80063628", "0x8009B1C0", "0x80028CC0", "0x800161C0", "0x8009AD60"]
+mod_function_entry_funcs = ["0x8009A800", "0x8009ABF4", "0x80064208", "0x80016A60", "0x80016B94", "0x80063628", "0x8009B1C0", "0x80028CC0", "0x800161C0", "0x8009AD60", "0x8002020C"]
 
 [runtime]
 debug_port = 4480
