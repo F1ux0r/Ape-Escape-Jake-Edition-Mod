@@ -88,3 +88,12 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Test saves: debug slot 9 (menu 10) normal level; debug slot 10 (menu 11) Jake race.
 - Not done: HUD icons (L2 face, lives shirt, race map head) still Spike; cutscene check; VRAM strip only
   verified free in 3 levels.
+
+## 2026-10-01 SMG aim + gunfire
+- Aim flipped: the game keeps a 40-entry stick ring at 0x800E5320 (4 s8 per sample: rx, ry, lx, ly; newest
+  index u32 at +0x170), turned into aim by pad update 0x8001325C (new hook). While the powered SMG is held,
+  each new sample's right stick is negated at that entry -> shoots where the stick points.
+  (Raw pad 1 buffer 0x800E52D0: +4 rx, +5 ry, +6 lx, +7 ly.)
+- Gunfire SFX: slingshot sounds captured by logging SPU voice regs from the plugin (debug read_ram can't read
+  SPU): aim start 0x03B90, release snap 0x049A0 (pitch 0x3AB, vol 0x2AD4), flight 0x04F50, hit 0x06D00.
+  SMG plays 0x049A0 at pitch 0x600, vol 0x2200, retriggered on our held voice each shot (ape_play_sfx).
