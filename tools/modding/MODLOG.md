@@ -155,3 +155,10 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   (freeze dump: in_exc=1, i_stat 0x200). Fix: don't restore DA6 (the game sets its own before each transfer)
   and skip a slot the IRQ address points into. Stress test re/sstress.py: 20 loads of slots 9/10/1, 0 IRQ
   events, game alive. Rule: never write SPU DA6/DA8 at an address matching DA4 while SPUCNT bit 6 is set.
+- MODEL GLITCH FIX: the mesh swap (transform entry -> DrawOTag) covers most of a frame, so savestates usually
+  capture Spike holding Jake's mesh words (mod memory 0x9F000400..). Loading one left them stuck (part count 18
+  -> transform hook bailed -> tail bones never posed), worst when loaded right after boot (Spike's real words
+  never seen). Fix: jake_unstick at transform entry puts the other object's own words back first; Spike's
+  model is resident at the same place in every level (0x801030BC, 0x801030C8, 0x80104748, 0x80103208,
+  0x801032C8 - checked in 5 saves), used as fallback after verifying 16 parts. Race Jake's own words are
+  remembered each frame for the same reason. Debug server can't create savestates ("LLE run"), only load.

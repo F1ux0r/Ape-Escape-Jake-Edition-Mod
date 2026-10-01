@@ -1070,6 +1070,40 @@ static void jake_swap_in(uint32_t object, const uint32_t mesh[JAKE_MESH_WORDS]) 
         psx_mod_write_word(object + (uint32_t)i * 4u, mesh[i]);
 }
 
+/*
+ * The swap is undone at DrawOTag, so between a frame's transform and its
+ * DrawOTag each object holds the other's mesh. A savestate taken in that
+ * window brings it back that way, with nothing left to undo it: Spike would
+ * keep Jake's 18-part mesh without the tail being posed (or the race's Jake
+ * Spike's). Seen at the transform outside our own swap, it is put back first.
+ */
+static uint32_t g_jake_object, g_jake_own[JAKE_MESH_WORDS];
+/* Spike's model is resident at the same place in every level; used when a
+ * stuck state is loaded before his own mesh words have been seen. */
+static const uint32_t SPIKE_MESH_RESIDENT[JAKE_MESH_WORDS] = {
+    0x801030BCu, 0x801030C8u, 0x80104748u, 0x80103208u, 0x801032C8u
+};
+
+static void jake_unstick(uint32_t object) {
+    const uint32_t word0 = psx_mod_read_word(object);
+    int i;
+    if (object == JAKE_SPIKE_OBJECT && !g_have_spike && g_jake_mesh_ready &&
+        word0 == g_jake_mesh[0] &&
+        jake_part_count(SPIKE_MESH_RESIDENT[0]) == JAKE_SPIKE_PARTS) {
+        for (i = 0; i < JAKE_MESH_WORDS; ++i)
+            g_spike_mesh[i] = SPIKE_MESH_RESIDENT[i];
+        g_have_spike = 1u;
+    }
+    if (object == JAKE_SPIKE_OBJECT && g_have_spike && g_jake_mesh_ready &&
+        word0 == g_jake_mesh[0]) {
+        for (i = 0; i < JAKE_MESH_WORDS; ++i)
+            psx_mod_write_word(object + (uint32_t)i * 4u, g_spike_mesh[i]);
+    } else if (object == g_jake_object && g_have_spike && word0 == g_spike_mesh[0]) {
+        for (i = 0; i < JAKE_MESH_WORDS; ++i)
+            psx_mod_write_word(object + (uint32_t)i * 4u, g_jake_own[i]);
+    }
+}
+
 static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
     const uint32_t object = cpu->gpr[4];
     uint32_t header, matrices;
@@ -1077,6 +1111,7 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
 
     if (!g_enabled || jake_is_swapped(object))
         return;
+    jake_unstick(object);
     header = psx_mod_read_word(object);
     matrices = psx_mod_read_word(object + 0x14u);
     if (object == JAKE_SPIKE_OBJECT) {
@@ -1095,6 +1130,8 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
     if (!jake_is_jake_mesh(header, psx_mod_read_word(object + 0x0Cu)))
         return;
     jake_capture_tail(matrices);
+    g_jake_object = object;
+    jake_read_mesh(object, g_jake_own);
     if (g_have_spike)
         jake_swap_in(object, g_spike_mesh);
 }
