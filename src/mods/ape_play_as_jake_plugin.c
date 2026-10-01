@@ -254,10 +254,17 @@ static int jake_retarget_polys(uint8_t* mesh, uint32_t polys, uint32_t end, uint
     return 1;
 }
 
-static void jake_prepare_mesh(void) {
+/*
+ * Copy Jake's mesh into guest memory. Game code reaches into the player's
+ * mesh by vertex number too (the slingshot band takes Spike's vertex 325,
+ * on his hand), and Jake has fewer vertices (293 to Spike's 328), so his
+ * vertex list is followed by Spike's own vertices from 293 on: any such
+ * index still lands on Spike's matching point instead of on polys.
+ */
+static void jake_prepare_mesh(uint32_t spike_object) {
     static uint8_t tried;
     uint8_t mesh[0x1E38];
-    uint32_t base, colours, parts, verts, polys, k;
+    uint32_t base, colours, parts, verts, polys, k, jake_verts, spike_verts, vert_list;
     if (tried || !g_disc_ok)
         return;
     tried = 1u;
@@ -271,17 +278,27 @@ static void jake_prepare_mesh(void) {
         fprintf(stderr, "play-as-jake: Jake's mesh did not parse\n");
         return;
     }
-    base = psx_mod_alloc_guest_memory(sizeof(mesh), 16u);
+    jake_verts = jake_get16(mesh + 6);
+    spike_verts = psx_mod_read_half(psx_mod_read_word(spike_object) + 6u);
+    if (spike_verts < jake_verts)
+        spike_verts = jake_verts;
+    base = psx_mod_alloc_guest_memory(sizeof(mesh) + spike_verts * 8u, 16u);
     if (base == 0u)
         return;
     for (k = 0; k < sizeof(mesh); k += 4)
         psx_mod_write_word(base + k, (uint32_t)mesh[k] | ((uint32_t)mesh[k + 1] << 8) |
                                      ((uint32_t)mesh[k + 2] << 16) | ((uint32_t)mesh[k + 3] << 24));
+    vert_list = base + sizeof(mesh);
+    for (k = 0; k < jake_verts * 8u; k += 4)
+        psx_mod_write_word(vert_list + k, psx_mod_read_word(base + verts + k));
+    for (; k < spike_verts * 8u; k += 4)
+        psx_mod_write_word(vert_list + k,
+                           psx_mod_read_word(psx_mod_read_word(spike_object + 0x10u) + k));
     g_jake_mesh[0] = base;
     g_jake_mesh[1] = base + colours;
     g_jake_mesh[2] = base + polys;
     g_jake_mesh[3] = base + parts;
-    g_jake_mesh[4] = base + verts;
+    g_jake_mesh[4] = vert_list;
     g_jake_mesh_ready = 1u;
 }
 
@@ -463,8 +480,10 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
     header = psx_mod_read_word(object);
     matrices = psx_mod_read_word(object + 0x14u);
     if (object == JAKE_SPIKE_OBJECT) {
-        jake_prepare_mesh();
-        if (jake_part_count(header) != JAKE_SPIKE_PARTS || !g_jake_mesh_ready)
+        if (jake_part_count(header) != JAKE_SPIKE_PARTS)
+            return;
+        jake_prepare_mesh(object);
+        if (!g_jake_mesh_ready)
             return;
         jake_read_mesh(object, g_spike_mesh);
         g_have_spike = 1u;
