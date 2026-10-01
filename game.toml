@@ -24,7 +24,8 @@ strict = true
 # 0x8009B1C0 = Sky Flyer handler (model matrix at 0x800E9E40).
 # 0x80063628 = Spike move step (between velocity clamp and integration).
 # 0x80016A60 = model vertex transform (a0 = object; net parts from 0x80099324).
-mod_function_entry_funcs = ["0x8009A800", "0x8009ABF4", "0x80064208", "0x80016A60", "0x80016B94", "0x80063628", "0x8009B1C0"]
+# 0x80028CC0 = DrawOTag (a0 = last ordering-table entry); grabber is linked in here.
+mod_function_entry_funcs = ["0x8009A800", "0x8009ABF4", "0x80064208", "0x80016A60", "0x80016B94", "0x80063628", "0x8009B1C0", "0x80028CC0"]
 
 [runtime]
 debug_port = 4480
