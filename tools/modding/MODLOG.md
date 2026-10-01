@@ -128,3 +128,11 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Stun Club swing yell = SPU 0x39B40 (0x8D0 bytes, pitch 0x4B8, disc 0x15AB30; keyed with swing whoosh 0x070A0).
   Voice code now takes a list of Spike yell slots; Jake's yell is cut to fit smaller slots with a 320-sample fade
   (swing slot keeps the first 0.30 s of 0.39 s; the dropped tail is the quiet end). Test: re/swingsfx.py.
+
+## 2026-10-01 Jake: redrawn HUD icons
+- Face icon redrawn (two hair spikes, round dome, no yellow headband) and lives shirt redrawn (sleeveless navy
+  top, no stripes) as 4-bit art in the recoloured palettes' indices, uploaded over Spike's texels in place with
+  the face texture: face page 0x17 -> VRAM (472,384) 5 halfwords x 16 (texture page bit 4 = +256 in y! a first
+  try at y 128 overwrote unrelated texels), shirt page 0x4F -> (1008,96) 8 x 32. Arena raised to 0x2000.
+- Designs: modding/art/face_new.txt, shirt_new.txt (face_design.py / shirt_design.py preview, art.inc -> C).
+  Note for publishing: the face's lower rows (eyes/mouth) are copied from the game's Spike icon.
