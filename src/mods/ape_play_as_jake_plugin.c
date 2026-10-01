@@ -42,7 +42,15 @@
 static const uint32_t JAKE_SPIKE_OBJECT = 0x800EC1E0u;
 static const uint32_t JAKE_TRANSFORM_FUNCTION = 0x80016A60u;
 static const uint32_t JAKE_DRAW_OT_FUNCTION = 0x80028CC0u;
-static const uint32_t JAKE_GP0 = 0x1F801810u;
+/* The ordering table of each frame buffer and the game's
+ * packet buffer pointer, as the model emitter uses them. */
+static const uint32_t JAKE_ORDERING_TABLE = 0x800EC3D0u;
+static const uint32_t JAKE_ORDERING_TABLE_STRIDE = 0x4078u;
+/* Our own GPU-DMA memory per buffer, never the game's packet buffer
+ * (which the game may already be refilling while the GPU reads it). */
+enum { JAKE_ARENA_SIZE = 0x1000 };
+static uint32_t g_arena[2], g_arena_used;
+static int g_arena_index;
 
 /* Disc user-data offsets (2048-byte sectors) in KKIIDDZZ.DAT. */
 static const uint32_t JAKE_DISC_MESH = 0x033E23ECu;
@@ -302,21 +310,52 @@ static void jake_prepare_mesh(uint32_t spike_object) {
     g_jake_mesh_ready = 1u;
 }
 
-/* CPU-to-VRAM copies of the face and its palette. */
-static void jake_upload_face(void) {
-    uint32_t k;
-    psx_mod_write_word(JAKE_GP0, 0x01000000u);   /* clear texture cache */
-    psx_mod_write_word(JAKE_GP0, 0xA0000000u);
-    psx_mod_write_word(JAKE_GP0, ((uint32_t)JAKE_CLUT_Y << 16) | JAKE_CLUT_X);
-    psx_mod_write_word(JAKE_GP0, (1u << 16) | 16u);
+/*
+ * CPU-to-VRAM copies of the face and its palette, as packets linked at the
+ * head of the table's far end (the first entry the GPU is given), so they
+ * land before anything is drawn with them. Never written to GP0 directly:
+ * a VBlank can fall inside one of the game's multi-word GPU commands, and
+ * the spliced words desync the GPU (garbled colours, then a crash).
+ */
+static void jake_link_packet(uint32_t entry, const uint32_t* words, uint32_t count) {
+    uint32_t packet, old, k;
+    if (g_arena[g_arena_index] == 0u ||
+        g_arena_used + 4u + count * 4u > JAKE_ARENA_SIZE)
+        return;
+    packet = g_arena[g_arena_index] + g_arena_used;
+    g_arena_used += 4u + count * 4u;
+    old = psx_mod_read_word(entry);
+    psx_mod_write_word(packet, (count << 24) | (old & 0x00FFFFFFu));
+    for (k = 0; k < count; ++k)
+        psx_mod_write_word(packet + 4u + k * 4u, words[k]);
+    psx_mod_write_word(entry, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+}
+
+static void jake_upload_face(uint32_t table) {
+    enum { ROWS = 16 };
+    const uint32_t far_entry = table + 0x3FFCu;
+    uint32_t words[3 + JAKE_VRAM_W * ROWS / 2];
+    uint32_t k, row;
+    /* Linked at the head, so the last linked is the first drawn: texture
+     * cache flush first (drawn after the copies), then the copies. */
+    words[0] = 0x01000000u;
+    jake_link_packet(far_entry, words, 1u);
+    words[0] = 0xA0000000u;
+    words[1] = ((uint32_t)JAKE_CLUT_Y << 16) | JAKE_CLUT_X;
+    words[2] = (1u << 16) | 16u;
     for (k = 0; k < 16; k += 2)
-        psx_mod_write_word(JAKE_GP0, g_face_clut[k] | ((uint32_t)g_face_clut[k + 1] << 16));
-    psx_mod_write_word(JAKE_GP0, 0xA0000000u);
-    psx_mod_write_word(JAKE_GP0, ((uint32_t)JAKE_VRAM_Y << 16) | JAKE_VRAM_X);
-    psx_mod_write_word(JAKE_GP0, ((uint32_t)JAKE_VRAM_H << 16) | JAKE_VRAM_W);
-    for (k = 0; k < JAKE_VRAM_W * JAKE_VRAM_H; k += 2)
-        psx_mod_write_word(JAKE_GP0, g_face_texels[k] | ((uint32_t)g_face_texels[k + 1] << 16));
-    psx_mod_write_word(JAKE_GP0, 0x01000000u);
+        words[3 + k / 2] = g_face_clut[k] | ((uint32_t)g_face_clut[k + 1] << 16);
+    jake_link_packet(far_entry, words, 3u + 8u);
+    for (row = 0; row < JAKE_VRAM_H; row += ROWS) {
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)(JAKE_VRAM_Y + row) << 16) | JAKE_VRAM_X;
+        words[2] = ((uint32_t)ROWS << 16) | JAKE_VRAM_W;
+        for (k = 0; k < JAKE_VRAM_W * ROWS; k += 2) {
+            const uint32_t at = row * JAKE_VRAM_W + k;
+            words[3 + k / 2] = g_face_texels[at] | ((uint32_t)g_face_texels[at + 1] << 16);
+        }
+        jake_link_packet(far_entry, words, 3u + JAKE_VRAM_W * ROWS / 2u);
+    }
 }
 
 /* ---- Bones ------------------------------------------------------------- */
@@ -502,21 +541,27 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
 /* The frame's drawing is queued: give every swapped object its own mesh
  * back before anything animates it again. */
 static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
+    static uint32_t uploads;
+    uint32_t index;
     int i, k;
-    (void)cpu;
     (void)address;
+    /* Keep the face in VRAM (level loads may write over that strip). */
+    for (index = 0u; index < 2u; ++index) {
+        const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;
+        if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu &&
+            uploads++ % JAKE_UPLOAD_PERIOD == 0u) {
+            if (g_arena[index] == 0u)
+                g_arena[index] = psx_mod_alloc_gpu_dma_memory(JAKE_ARENA_SIZE, 16u);
+            g_arena_index = (int)index;
+            g_arena_used = 0u;
+            jake_upload_face(table);
+        }
+    }
     for (i = 0; i < g_swapped_count; ++i)
         for (k = 0; k < JAKE_MESH_WORDS; ++k)
             psx_mod_write_word(g_swapped[i] + (uint32_t)k * 4u, g_swapped_words[i][k]);
     g_swapped_count = 0;
     ++g_frame;
-}
-
-/* Keep the face in VRAM (level loads may write over that strip). */
-static void jake_vblank(void) {
-    static uint32_t frames;
-    if (g_jake_mesh_ready && frames++ % JAKE_UPLOAD_PERIOD == 0u)
-        jake_upload_face();
 }
 
 static void jake_activate(void) {
@@ -526,7 +571,6 @@ static void jake_activate(void) {
 
 PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
     (void)psx_mod_register_activation_plugin("ape.characters.play-as-jake", jake_activate);
-    (void)psx_mod_register_vblank_plugin("ape.characters.play-as-jake", jake_vblank);
     (void)psx_mod_register_function_entry_plugin(
         "ape.characters.play-as-jake", JAKE_TRANSFORM_FUNCTION, jake_transform_entry);
     (void)psx_mod_register_function_entry_plugin(
