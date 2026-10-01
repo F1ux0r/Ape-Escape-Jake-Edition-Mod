@@ -141,3 +141,11 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   contiguous: 0x36B30, 0x38560, 0x38F00, 0x39B40, 0x3A420...; disc offset = SPU addr + 0x120FF0. Catch also
   plays 0x3F0E0 + jingle 0x2B230/0x18990 a second later (kept). Found with re/recorder.py while the user
   played (logs non-music key-ons with Spike's state), spinsfx.py, stockcatch.py, netswing.py.
+- Level-clear outro "Yes!": not an SPU sample - the outro music is CD-XA (file 1, channel 6; ch 7 identical;
+  interleave from LBA 40187, ch6 sectors 40193 + 8k, 145 sectors, 7.73 s stereo 37.8 kHz) and the voice is
+  baked in: first ~0.62 s, pure mono, f0 ~390 Hz, music (stereo) starts ~0.6 s. No voiceless copy on the disc
+  (channels 0-5 are other 9.28 s streams). Fix: plugin vblank watches cdrom_debug_get_sector_history; when the
+  interleave's first sectors (40187..40192) are read it holds SPU CD input volume (0x1F801DB0/DB2) at 0 until
+  15 ch6 sectors are delivered, then fades back (6 frames) to the game's value; 120-frame cap. Measured: mute
+  40 ms before first CD audio, unmute after 0.73 s. Tools: re/xadec.py (XA -> wav from the .bin),
+  outrocd.py (sector log), outromute.py (spu_status poll), outrocatch.py (catch on save slot 1 = menu 2).

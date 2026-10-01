@@ -1,5 +1,6 @@
 #include "cpu_state.h"
 #include "mod_plugins.h"
+#include "cdrom.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -504,10 +505,98 @@ static void jake_install_voice(void) {
     }
 }
 
+/*
+ * The level-clear outro streams its music from the CD as XA audio (file 1,
+ * channel 6 - channel 7 is a copy - interleaved from LBA 40187, the channel
+ * from 40193, every 8th sector), and Spike's "Yes!" is baked into it: the
+ * first ~0.62 s, mono, before the stereo music comes in. There is no
+ * voiceless copy, so the CD input volume is held at zero from the moment
+ * that interleave starts being read until the voice has played out: 15
+ * channel sectors (53 ms each; the voice is 12, the rest covers the SPU's
+ * CD buffer), then faded back to what the game had set.
+ */
+static const uint32_t SPU_CD_VOLUME_LEFT = 0x1F801DB0u;
+static const uint32_t SPU_CD_VOLUME_RIGHT = 0x1F801DB2u;
+enum {
+    OUTRO_XA_FILE = 1,
+    OUTRO_XA_FIRST_LBA = 40187,
+    OUTRO_XA_VOICE_LBA = 40193,         /* channel 6; 40194 for its copy */
+    OUTRO_XA_INTERLEAVE = 8,
+    OUTRO_VOICE_SECTORS = 15,
+    OUTRO_FADE_FRAMES = 6,
+    OUTRO_MAX_MUTE_FRAMES = 120         /* a savestate load mid-outro */
+};
+
+static struct {
+    uint64_t seen;                      /* sector history entries handled */
+    uint8_t muting, started;
+    uint32_t sectors, fade, frames;
+    uint16_t volume[2];                 /* the game's CD volume */
+} g_outro;
+
+static void jake_set_cd_volume(uint16_t left, uint16_t right) {
+    psx_mod_write_half(SPU_CD_VOLUME_LEFT, left);
+    psx_mod_write_half(SPU_CD_VOLUME_RIGHT, right);
+}
+
+static void jake_outro_vblank(void) {
+    const CDROMSectorHistoryEntry* entries = NULL;
+    const uint64_t total = cdrom_debug_get_sector_history(&entries);
+    uint64_t seq = g_outro.seen;
+    if (!g_outro.started) {             /* only what is read from now on */
+        g_outro.started = 1u;
+        g_outro.seen = total;
+        return;
+    }
+    if (total - seq > CDROM_SECTOR_HISTORY_CAP)
+        seq = total - CDROM_SECTOR_HISTORY_CAP;
+    for (; entries && seq < total; ++seq) {
+        const CDROMSectorHistoryEntry* e = &entries[seq % CDROM_SECTOR_HISTORY_CAP];
+        if (e->seq != seq || e->xa_file != OUTRO_XA_FILE)
+            continue;
+        if (e->lba >= OUTRO_XA_FIRST_LBA && e->lba < OUTRO_XA_VOICE_LBA && !g_outro.muting) {
+            g_outro.muting = 1u;
+            g_outro.sectors = 0u;
+            g_outro.fade = 0u;
+            g_outro.frames = 0u;
+            g_outro.volume[0] = psx_mod_read_half(SPU_CD_VOLUME_LEFT);
+            g_outro.volume[1] = psx_mod_read_half(SPU_CD_VOLUME_RIGHT);
+        }
+        if (g_outro.muting && e->xa_audio_delivered && e->lba >= OUTRO_XA_VOICE_LBA &&
+            (e->lba - OUTRO_XA_VOICE_LBA) % OUTRO_XA_INTERLEAVE <= 1 &&
+            ++g_outro.sectors >= OUTRO_VOICE_SECTORS) {
+            g_outro.muting = 0u;
+            g_outro.fade = OUTRO_FADE_FRAMES;
+        }
+    }
+    g_outro.seen = total;
+    if (g_outro.muting && ++g_outro.frames > OUTRO_MAX_MUTE_FRAMES) {
+        g_outro.muting = 0u;
+        g_outro.fade = OUTRO_FADE_FRAMES;
+    }
+    if (g_outro.muting) {
+        /* Keep whatever the game sets meanwhile for afterwards. */
+        const uint16_t l = psx_mod_read_half(SPU_CD_VOLUME_LEFT);
+        const uint16_t r = psx_mod_read_half(SPU_CD_VOLUME_RIGHT);
+        if (l != 0u || r != 0u) {
+            g_outro.volume[0] = l;
+            g_outro.volume[1] = r;
+        }
+        jake_set_cd_volume(0u, 0u);
+    } else if (g_outro.fade > 0u) {
+        const int32_t step = OUTRO_FADE_FRAMES - (int32_t)--g_outro.fade;
+        jake_set_cd_volume((uint16_t)((int16_t)g_outro.volume[0] * step / OUTRO_FADE_FRAMES),
+                           (uint16_t)((int16_t)g_outro.volume[1] * step / OUTRO_FADE_FRAMES));
+    }
+}
+
 static void jake_vblank(void) {
     static uint32_t ticks;
-    if (g_enabled && ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
+    if (!g_enabled)
+        return;
+    if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
+    jake_outro_vblank();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
