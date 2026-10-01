@@ -114,3 +114,14 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   0x800E78C0 inverse x head matrix, columns renormalised for the screen y scale). Race still copies Jake's live
   tail. Test: re/tailtest.py.
 - Still open: in-engine cutscenes unchecked.
+
+## 2026-10-01 Jake: double-jump voice
+- Spike's double-jump yell = SPU sample 0x38F00 (0xC30 bytes, keyed pitch 0x4B8; disc user offset 0x159EF0).
+  Jake's jump yell (race, water jump ~4.7 s in) = SPU 0x71030 in the race bank (0xDE0 bytes, pitch 0x5D2;
+  disc user offset 0x2E9948, also 0x317DF8), keyed with the generic jump whoosh 0x03530.
+- Plugin reads Jake's from disc, decodes, resamples 0x5D2 -> 0x4B8 rate, re-encodes ADPCM (best of 5 filters x 13
+  shifts per block; 24 dB vs source) to 0xB50 bytes, and every 30 vblanks writes it over 0x38F00 via the SPU
+  manual transfer port (0x1F801DA6 addr, 0x1F801DA8 FIFO; restores DA6) when that slot still holds Spike's yell
+  (compared against the disc). Reinstalls after level loads/savestates (verified in the race).
+- Debug: spu_events (KEYON ring with addr/pitch), spu_ram (peek; returns UPPERCASE hex). Tools: re/keyons.py,
+  spuwav.py (ADPCM -> wav), djump.py, racecorr.py. Extracted wavs in modding/sfx (not committed: game audio).
