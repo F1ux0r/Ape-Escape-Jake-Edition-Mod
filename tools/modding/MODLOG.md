@@ -125,3 +125,6 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   (compared against the disc). Reinstalls after level loads/savestates (verified in the race).
 - Debug: spu_events (KEYON ring with addr/pitch), spu_ram (peek; returns UPPERCASE hex). Tools: re/keyons.py,
   spuwav.py (ADPCM -> wav), djump.py, racecorr.py. Extracted wavs in modding/sfx (not committed: game audio).
+- Stun Club swing yell = SPU 0x39B40 (0x8D0 bytes, pitch 0x4B8, disc 0x15AB30; keyed with swing whoosh 0x070A0).
+  Voice code now takes a list of Spike yell slots; Jake's yell is cut to fit smaller slots with a 320-sample fade
+  (swing slot keeps the first 0.30 s of 0.39 s; the dropped tail is the quiet end). Test: re/swingsfx.py.

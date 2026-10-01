@@ -257,35 +257,42 @@ static void jake_load_disc(void) {
 /* ---- Voice ------------------------------------------------------------- */
 
 /*
- * Spike's double-jump yell becomes Jake's jump yell (the one he gives
- * leaping into the water in his race). Spike's yell is SPU sample 0x38F00
- * (0xC30 bytes; keyed at pitch 0x4B8, ~13 kHz); Jake's is in his race's
- * sound bank (disc user offset 0x2E9948, 0xDE0 bytes, pitch 0x5D2, ~16 kHz),
- * only loaded there. At start Jake's is read from the disc, decoded,
- * resampled to Spike's playback rate (so he keeps his own pitch) and
- * re-encoded, which also makes it short enough (0xB50 bytes) to fit in
- * Spike's slot. Every half second, if SPU RAM holds Spike's yell (a level
- * load puts it back), Jake's is written over it through the SPU's manual
- * transfer port; anything else there is left alone.
+ * Spike's yells become Jake's jump yell (the one he gives leaping into the
+ * water in his race): the double jump's (SPU sample 0x38F00, 0xC30 bytes)
+ * and the Stun Club swing's (0x39B40, 0x8D0 bytes), both keyed at pitch
+ * 0x4B8 (~13 kHz). Jake's is in his race's sound bank only (disc user
+ * offset 0x2E9948, 0xDE0 bytes, pitch 0x5D2, ~16 kHz). At start it is read
+ * from the disc, decoded, resampled to Spike's playback rate (so he keeps
+ * his own pitch) and re-encoded for each slot, cut short with a fade where
+ * the slot is smaller (its tail is the quiet end of the yell). Every half
+ * second, a slot that holds Spike's yell (a level load puts it back) gets
+ * Jake's written over it through the SPU's manual transfer port; anything
+ * else there is left alone.
  */
 uint32_t spu_ram_peek(uint32_t addr, uint8_t* out, uint32_t len);
 
 static const uint32_t JAKE_DISC_VOICE = 0x002E9948u;
-static const uint32_t SPIKE_DISC_YELL = 0x00159EF0u;
 enum {
     JAKE_VOICE_SIZE = 0xDE0,
-    SPIKE_YELL_SPU = 0x38F00,
-    SPIKE_YELL_SIZE = 0xC30,
     JAKE_VOICE_PITCH = 0x5D2,
     SPIKE_YELL_PITCH = 0x4B8,
+    SPIKE_YELL_MAX_SIZE = 0xC30,
+    JAKE_VOICE_FADE = 320,          /* samples, ~25 ms */
     JAKE_VOICE_CHECK_PERIOD = 30
 };
 static const uint32_t SPU_TRANSFER_ADDRESS = 0x1F801DA6u;
 static const uint32_t SPU_TRANSFER_FIFO = 0x1F801DA8u;
 
-static uint8_t g_spike_yell_head[64];   /* first data blocks, to recognise it */
-static uint8_t g_jake_yell[SPIKE_YELL_SIZE];
-static uint32_t g_jake_yell_size;
+static struct {
+    uint32_t spu, size, disc;
+    uint8_t head[64];               /* Spike's first blocks, to recognise it */
+    uint8_t jake[SPIKE_YELL_MAX_SIZE];
+    uint32_t jake_size;
+} g_yells[] = {
+    { 0x38F00u, 0xC30u, 0x00159EF0u },   /* double jump */
+    { 0x39B40u, 0x8D0u, 0x0015AB30u },   /* Stun Club swing */
+};
+enum { JAKE_YELL_COUNT = sizeof(g_yells) / sizeof(g_yells[0]) };
 
 static const int JAKE_ADPCM_FILTERS[5][2] = {
     { 0, 0 }, { 60, 0 }, { 115, -52 }, { 98, -55 }, { 122, -60 }
@@ -360,42 +367,56 @@ static void jake_adpcm_block(const int16_t* x, int* s1, int* s2, uint8_t flags, 
 
 static void jake_build_voice(const uint8_t* disc) {
     static int16_t pcm[JAKE_VOICE_SIZE / 16 * 28], resampled[JAKE_VOICE_SIZE / 16 * 28];
-    /* Skip the source's silent lead-in block; ours is added below. */
+    static int16_t cut[JAKE_VOICE_SIZE / 16 * 28];
+    /* Skip the source's silent lead-in block; each slot gets its own. */
     const uint32_t n = jake_adpcm_decode(disc + 16, JAKE_VOICE_SIZE - 16u, pcm, sizeof(pcm) / sizeof(pcm[0]));
     const uint32_t m = (uint32_t)((uint64_t)n * SPIKE_YELL_PITCH / JAKE_VOICE_PITCH);
-    const uint32_t blocks = (m + 27u) / 28u;
+    const uint32_t full_blocks = (m + 27u) / 28u;
     uint32_t i, b;
-    int s1 = 0, s2 = 0;
-    if (16u * (blocks + 1u) > SPIKE_YELL_SIZE)
-        return;
-    for (i = 0; i < blocks * 28u; ++i) {
+    int y;
+    for (i = 0; i < full_blocks * 28u; ++i) {
         const float at = (float)i * JAKE_VOICE_PITCH / SPIKE_YELL_PITCH;
         const uint32_t k = (uint32_t)at;
         const float t = at - (float)k;
         resampled[i] = i >= m || k + 1u >= n ? 0
             : (int16_t)((float)pcm[k] * (1.0f - t) + (float)pcm[k + 1u] * t);
     }
-    memset(g_jake_yell, 0, 16);   /* the silent lead-in block, as stock */
-    for (b = 0; b < blocks; ++b)
-        jake_adpcm_block(resampled + b * 28u, &s1, &s2,
-                         (uint8_t)(b == 0 ? 0x04u : b + 1u == blocks ? 0x01u : 0x00u),
-                         g_jake_yell + 16u * (b + 1u));
-    g_jake_yell_size = 16u * (blocks + 1u);
+    for (y = 0; y < JAKE_YELL_COUNT; ++y) {
+        const uint32_t room = g_yells[y].size / 16u - 1u;   /* after the lead-in */
+        const uint32_t blocks = full_blocks < room ? full_blocks : room;
+        int s1 = 0, s2 = 0;
+        memcpy(cut, resampled, blocks * 28u * sizeof(cut[0]));
+        if (blocks < full_blocks) {
+            const uint32_t end = blocks * 28u;
+            for (i = 0; i < JAKE_VOICE_FADE && i < end; ++i)
+                cut[end - 1u - i] = (int16_t)((int32_t)cut[end - 1u - i] * (int32_t)i /
+                                              JAKE_VOICE_FADE);
+        }
+        memset(g_yells[y].jake, 0, 16);   /* the silent lead-in block, as stock */
+        for (b = 0; b < blocks; ++b)
+            jake_adpcm_block(cut + b * 28u, &s1, &s2,
+                             (uint8_t)(b == 0 ? 0x04u : b + 1u == blocks ? 0x01u : 0x00u),
+                             g_yells[y].jake + 16u * (b + 1u));
+        g_yells[y].jake_size = 16u * (blocks + 1u);
+    }
 }
 
 static void jake_install_voice(void) {
-    uint8_t head[sizeof(g_spike_yell_head)];
     const uint16_t saved = psx_mod_read_half(SPU_TRANSFER_ADDRESS);
-    uint32_t i;
-    if (g_jake_yell_size == 0u ||
-        spu_ram_peek(SPIKE_YELL_SPU, head, sizeof(head)) != sizeof(head) ||
-        memcmp(head, g_spike_yell_head, sizeof(head)) != 0)
-        return;
-    psx_mod_write_half(SPU_TRANSFER_ADDRESS, (uint16_t)(SPIKE_YELL_SPU >> 3));
-    for (i = 0; i < g_jake_yell_size; i += 2u)
-        psx_mod_write_half(SPU_TRANSFER_FIFO,
-                           (uint16_t)(g_jake_yell[i] | (g_jake_yell[i + 1u] << 8)));
-    psx_mod_write_half(SPU_TRANSFER_ADDRESS, saved);
+    int y;
+    for (y = 0; y < JAKE_YELL_COUNT; ++y) {
+        uint8_t head[sizeof(g_yells[y].head)];
+        uint32_t i;
+        if (g_yells[y].jake_size == 0u ||
+            spu_ram_peek(g_yells[y].spu, head, sizeof(head)) != sizeof(head) ||
+            memcmp(head, g_yells[y].head, sizeof(head)) != 0)
+            continue;
+        psx_mod_write_half(SPU_TRANSFER_ADDRESS, (uint16_t)(g_yells[y].spu >> 3));
+        for (i = 0; i < g_yells[y].jake_size; i += 2u)
+            psx_mod_write_half(SPU_TRANSFER_FIFO,
+                               (uint16_t)(g_yells[y].jake[i] | (g_yells[y].jake[i + 1u] << 8)));
+        psx_mod_write_half(SPU_TRANSFER_ADDRESS, saved);
+    }
 }
 
 static void jake_vblank(void) {
@@ -949,9 +970,11 @@ static void jake_load_voice(void) {
     FILE* f;
     if (!jake_disc_path(path, sizeof(path)) || !(f = fopen(path, "rb")))
         return;
-    if (jake_read_disc(f, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) &&
-        jake_read_disc(f, SPIKE_DISC_YELL, g_spike_yell_head, sizeof(g_spike_yell_head)) &&
-        disc[17] == 0x04u && g_spike_yell_head[17] == 0x04u)
+    int y, ok = jake_read_disc(f, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) && disc[17] == 0x04u;
+    for (y = 0; ok && y < JAKE_YELL_COUNT; ++y)
+        ok = jake_read_disc(f, g_yells[y].disc, g_yells[y].head, sizeof(g_yells[y].head)) &&
+             g_yells[y].head[17] == 0x04u;
+    if (ok)
         jake_build_voice(disc);
     else
         fprintf(stderr, "play-as-jake: Jake's voice was not found on this disc\n");
