@@ -48,6 +48,11 @@ hooks. Reason: new projectiles, models and flight physics need real code; declar
   (both desynced the GPU: garbled colours, freezes, "GP0 unknown command" in psx_last_run_report.json). All our
   drawing = packets in our own psx_mod_alloc_gpu_dma_memory arena per buffer, linked at DrawOTag 0x80028CC0.
   Check: debug cmd gpu_opcodes (no 0x03-0x1F / 0xE7+), gpu_frame_dump frame=N for context.
+- Runtime gotcha: psx_mod_register_function_entry_plugin keeps ONE hook per (plugin id, address); a second
+  silently fails. Entry hooks run whether the feature is enabled or not.
+- HUD: the game's HUD list hangs off OT entry 0 via table+0x4000 (drawn after the main table); our glow is
+  appended at the very end of that chain. Club blade = model 0x800EC0F0 (colours blue/teal/white), halo = glow
+  beam 0x8002020C (a3 colour, ra 0x8009AD34); both red while powered.
 - Git: branch `power-up-gadgets` in ApeEscapeRecomp (first commit 1abe4da); prepared_disc/ + psxrecomp/ are
   excluded via .git/info/exclude (disc data, never commit). Commit each working gadget step.
 - Owed: remove debug-only code (PUGD block 0x9F000000, object logger, 0x80016B94 + 0x800161C0 hooks, part masks);
