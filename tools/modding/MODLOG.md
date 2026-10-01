@@ -97,3 +97,7 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Gunfire SFX: slingshot sounds captured by logging SPU voice regs from the plugin (debug read_ram can't read
   SPU): aim start 0x03B90, release snap 0x049A0 (pitch 0x3AB, vol 0x2AD4), flight 0x04F50, hit 0x06D00.
   SMG plays 0x049A0 at pitch 0x600, vol 0x2200, retriggered on our held voice each shot (ape_play_sfx).
+- Ammo lock: slingshot ammo type at 0x800F51C0 (0 standard, 1 explosive, 2 homing; cycled by R3 or by
+  pressing the slingshot button again). While the SMG is powered: R3 masked out of pad 1 (0x800E52D2 bit 2,
+  active low) at the pad-update hook, ammo held at 0; the pre-power-on choice is restored for 20 frames
+  after power-down so that press's own cycle doesn't stick. Test: re/ammotest.py.
