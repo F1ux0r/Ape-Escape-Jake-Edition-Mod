@@ -162,3 +162,14 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   model is resident at the same place in every level (0x801030BC, 0x801030C8, 0x80104748, 0x80103208,
   0x801032C8 - checked in 5 saves), used as fallback after verifying 16 parts. Race Jake's own words are
   remembered each frame for the same reason. Debug server can't create savestates ("LLE run"), only load.
+
+## 2026-10-02 Jake: extra-life pickup is Jake's shirt
+- The 1-up is level model entry 0x800F4D40 (same entry in all 5 saves checked: header 40 polys, 20 verts,
+  13 colours; polys 28 bytes each - tri and quad alike - palette u16 at +14; stock palette 0x36FF = (1008,219),
+  texture page 0x2F, a red patch with a white stripe at u 96..127, v 64..95). Found it from the GPU frame dump
+  (re/primsat.py: polys in a screen box) + write trace on the packet buffer filtered by palette (writer
+  0x80019D48, a1 = poly pointer). Zeroing verts of other table entries didn't hide it (re/lifefind.py).
+- Patch (in place in level data, idempotent, rescans the table 0x800F4000..0x800F5000 every 30 frames when
+  the cached entry stops matching; identified by counts + verts 0/18/19): every poly's palette -> navy
+  palette uploaded at (960,254) with the other Jake palettes (whites mapped to navy too = no stripe);
+  sleeves folded: 2->1, 14->13, 3->4, 15->16 and 11->0, 5->12, 10->9, 17->8 (re/lifemesh.py dumps mesh/texture).

@@ -184,6 +184,37 @@ static const struct {
 };
 enum { JAKE_HUD_ART_COUNT = sizeof(JAKE_HUD_ART) / sizeof(JAKE_HUD_ART[0]) };
 
+/*
+ * The extra-life pickup is Spike's red shirt: a level model (entry of four
+ * words: header, colours, polys, verts) in the table around 0x800F4C80,
+ * 20 verts and 40 textured polys (28 bytes each, palette at +14) on a red
+ * patch with a white stripe. Made Jake's like the lives icon: the polys use
+ * a navy palette uploaded to (960,254), the stripe's whites the same navy,
+ * and the sleeves are folded away (each sleeve vertex moved onto the
+ * shoulder vertex it hangs from, so their polys draw nothing). Patched in
+ * place in the level data; the next level load brings back the stock copy.
+ */
+enum {
+    JAKE_LIFE_VERTS = 20, JAKE_LIFE_POLYS = 40, JAKE_LIFE_COLOURS = 13,
+    JAKE_LIFE_POLY_SIZE = 28,
+    JAKE_LIFE_CLUT_X = 960, JAKE_LIFE_CLUT_Y = 254,
+    JAKE_LIFE_SCAN_PERIOD = 30
+};
+static const uint32_t JAKE_LIFE_TABLE = 0x800F4000u, JAKE_LIFE_TABLE_END = 0x800F5000u;
+static const uint16_t JAKE_LIFE_PALETTE[16] = {
+    0xA4A5, 0xB4E7, 0xB4E7, 0xBD08, 0xB4E7, 0xA8A5, 0xB8E7, 0xB4E7,
+    0xB0C6, 0xA8A5, 0xB4E7, 0xB4E7, 0xBD08, 0xB8E7, 0xA4A5, 0xA8A5
+};
+/* Sleeve vertex -> shoulder vertex. */
+static const uint8_t JAKE_LIFE_FOLD[8][2] = {
+    { 2, 1 }, { 14, 13 }, { 3, 4 }, { 15, 16 },
+    { 11, 0 }, { 5, 12 }, { 10, 9 }, { 17, 8 },
+};
+/* Untouched verts that identify the model (index, x, y, z). */
+static const int16_t JAKE_LIFE_KEY[3][4] = {
+    { 0, 8, -51, 35 }, { 18, 28, 48, -39 }, { 19, -35, 49, 24 },
+};
+
 typedef struct JakeAffine {
     float r[3][3];
     float t[3];
@@ -747,6 +778,12 @@ static void jake_upload_face(uint32_t table) {
             words[3 + k / 2] = icon->palette[k] | ((uint32_t)icon->palette[k + 1] << 16);
         jake_link_packet(far_entry, words, 3u + 8u);
     }
+    words[0] = 0xA0000000u;
+    words[1] = ((uint32_t)JAKE_LIFE_CLUT_Y << 16) | JAKE_LIFE_CLUT_X;
+    words[2] = (1u << 16) | 16u;
+    for (k = 0; k < 16; k += 2)
+        words[3 + k / 2] = JAKE_LIFE_PALETTE[k] | ((uint32_t)JAKE_LIFE_PALETTE[k + 1] << 16);
+    jake_link_packet(far_entry, words, 3u + 8u);
     for (row = 0; row < JAKE_HUD_ART_COUNT; ++row) {
         const uint32_t count = (uint32_t)JAKE_HUD_ART[row].w_halfwords * JAKE_HUD_ART[row].h;
         words[0] = 0xA0000000u;
@@ -1136,6 +1173,54 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
         jake_swap_in(object, g_spike_mesh);
 }
 
+static int jake_is_life_model(uint32_t entry) {
+    const uint32_t header = psx_mod_read_word(entry);
+    const uint32_t verts = psx_mod_read_word(entry + 12u);
+    int i, k;
+    if ((header >> 24) != 0x80u || (verts >> 24) != 0x80u ||
+        psx_mod_read_half(header + 2u) != JAKE_LIFE_POLYS ||
+        psx_mod_read_half(header + 6u) != JAKE_LIFE_VERTS ||
+        psx_mod_read_half(header + 8u) != JAKE_LIFE_COLOURS)
+        return 0;
+    for (i = 0; i < 3; ++i)
+        for (k = 0; k < 3; ++k)
+            if ((int16_t)psx_mod_read_half(verts + (uint32_t)JAKE_LIFE_KEY[i][0] * 8u +
+                                           (uint32_t)k * 2u) != JAKE_LIFE_KEY[i][k + 1])
+                return 0;
+    return 1;
+}
+
+/* Find the extra-life model in this level's table (it moves between levels)
+ * and patch it; a patched one passes the check too, and patching is
+ * idempotent. */
+static void jake_patch_life(void) {
+    static uint32_t found, scans;
+    const uint16_t clut = (uint16_t)((JAKE_LIFE_CLUT_Y << 6) | (JAKE_LIFE_CLUT_X >> 4));
+    uint32_t entry, polys, verts;
+    int i, k;
+    if (found == 0u || !jake_is_life_model(found)) {
+        found = 0u;
+        if (scans++ % JAKE_LIFE_SCAN_PERIOD != 0u)
+            return;
+        for (entry = JAKE_LIFE_TABLE; entry < JAKE_LIFE_TABLE_END && found == 0u; entry += 16u)
+            if (jake_is_life_model(entry))
+                found = entry;
+        if (found == 0u)
+            return;
+    }
+    polys = psx_mod_read_word(found + 8u);
+    verts = psx_mod_read_word(found + 12u);
+    if (psx_mod_read_half(polys + 14u) == clut)
+        return;
+    for (i = 0; i < JAKE_LIFE_POLYS; ++i)
+        psx_mod_write_half(polys + (uint32_t)i * JAKE_LIFE_POLY_SIZE + 14u, clut);
+    for (i = 0; i < 8; ++i)
+        for (k = 0; k < 3; ++k)
+            psx_mod_write_half(verts + JAKE_LIFE_FOLD[i][0] * 8u + (uint32_t)k * 2u,
+                               psx_mod_read_half(verts + JAKE_LIFE_FOLD[i][1] * 8u +
+                                                 (uint32_t)k * 2u));
+}
+
 /* Point Spike's HUD sprites (texture-page word, then a 0x64..0x67 sprite:
  * colour, xy, clut<<16 | uv, size) at the recoloured palettes. The HUD list
  * hangs off table + 0x4000 and is drawn after the main table. */
@@ -1192,6 +1277,8 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
         if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu)
             jake_recolour_hud(table);
     }
+    if (g_enabled && g_jake_mesh_ready)
+        jake_patch_life();
     for (i = 0; i < g_swapped_count; ++i)
         for (k = 0; k < JAKE_MESH_WORDS; ++k)
             psx_mod_write_word(g_swapped[i] + (uint32_t)k * 4u, g_swapped_words[i][k]);
