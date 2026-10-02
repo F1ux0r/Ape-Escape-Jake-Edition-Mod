@@ -191,3 +191,17 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   Jake into ANY object with Spike's header, tail posed at rest (the sway physics track the level Spike only).
   An object stuck holding our copy (savestate) is still treated as Jake, not as race-Jake. Checked: title
   (debug slot 0), level (9) and race (10) all still right.
+
+## 2026-10-02 Jake: "JAKE EDITION" on the title screen
+- Art: modding/art/edition.py (logo-style renderer: per-letter tilt/bounce, yellow->orange fill with streaks,
+  pale rim, navy outline, blue extrusion down-left) + edition_tex.py (Knewave, OFL, set upright with a -0.28
+  shear; 256x62, 15 colours + transparent -> art/edition.inc, copied to src/mods/ape_jake_edition.inc).
+  Fonts tried are in art/fonts (Google Fonts, OFL/Apache) - credit Knewave (Tyler Finck) when publishing.
+- The logo is a 3D model drawn by the title overlay itself (not 0x801379A0/B0). Title = overlay code present:
+  0x80136930 == 0x0C005870 (jal 0x800161C0) and 0x80136C94 == 0x0C04DB40.
+- VRAM free on the title: x 960..1023, y 384..~495. Texture at (960,384) 4-bit (page 0x1F: y base 256, so
+  v starts at 128!), palette (960,448); uploaded with the Jake uploads every 8 frames (arena 0x2000->0x4000,
+  copy packets 7 rows = 227 words). Quad 0x2D raw at screen (208,138) 108x22 (1.2x wide for the 384-px
+  picture), linked after OT entry 0 so it's on the scene, under the menu.
+- BUG on the way: packet tag count 8 for a 9-word quad -> GPU ate the next command's word, whole title
+  misparsed (font sheet where the logo was). Tag count = words after the tag, always.

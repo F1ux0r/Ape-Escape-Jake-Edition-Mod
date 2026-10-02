@@ -50,7 +50,7 @@ static const uint32_t JAKE_ORDERING_TABLE = 0x800EC3D0u;
 static const uint32_t JAKE_ORDERING_TABLE_STRIDE = 0x4078u;
 /* Our own GPU-DMA memory per buffer, never the game's packet buffer
  * (which the game may already be refilling while the GPU reads it). */
-enum { JAKE_ARENA_SIZE = 0x2000 };
+enum { JAKE_ARENA_SIZE = 0x4000 };
 static uint32_t g_arena[2], g_arena_used;
 static int g_arena_index;
 
@@ -1363,6 +1363,80 @@ static void jake_recolour_hud(uint32_t table) {
     }
 }
 
+/*
+ * "JAKE EDITION" under the title logo: a 256x62 4-bit texture (made by
+ * modding/art/edition_tex.py in the logo's style) kept uploaded to VRAM that
+ * is free on the title screen (x 960..1023, y 384..445; palette at
+ * (960,448)) and drawn as one raw-textured quad linked at the near end of
+ * the table, so it sits on the scene, under the menu. The game runs 384
+ * pixels across a 4:3 picture, so the quad is 1.2x wider than the art.
+ * The title screen is told by its code being loaded (two calls in it).
+ */
+#include "ape_jake_edition.inc"
+enum {
+    EDITION_VRAM_X = 960, EDITION_VRAM_Y = 384,
+    EDITION_CLUT_X = 960, EDITION_CLUT_Y = 448,
+    EDITION_ROWS = 7,                   /* texel rows per copy packet */
+    EDITION_X = 208, EDITION_Y = 138,   /* screen box, top left */
+    EDITION_W = 108, EDITION_H = 22
+};
+static uint32_t g_edition_quad[2];
+
+static int jake_on_title(void) {
+    return psx_mod_read_word(0x80136930u) == 0x0C005870u &&   /* jal 0x800161C0 */
+           psx_mod_read_word(0x80136C94u) == 0x0C04DB40u;     /* jal 0x80136D00 */
+}
+
+static void jake_upload_edition(uint32_t table) {
+    const uint32_t far_entry = table + 0x3FFCu;
+    const uint32_t row_words = JAKE_EDITION_W / 8u;   /* 4 texels a halfword */
+    uint32_t words[3 + EDITION_ROWS * JAKE_EDITION_W / 8];
+    uint32_t row, k;
+    words[0] = 0xA0000000u;
+    words[1] = ((uint32_t)EDITION_CLUT_Y << 16) | EDITION_CLUT_X;
+    words[2] = (1u << 16) | 16u;
+    for (k = 0; k < 16; k += 2)
+        words[3 + k / 2] = JAKE_EDITION_PALETTE[k] | ((uint32_t)JAKE_EDITION_PALETTE[k + 1] << 16);
+    jake_link_packet(far_entry, words, 3u + 8u);
+    for (row = 0; row < JAKE_EDITION_H; row += EDITION_ROWS) {
+        const uint32_t rows = JAKE_EDITION_H - row < EDITION_ROWS ? JAKE_EDITION_H - row : EDITION_ROWS;
+        const uint16_t* src = JAKE_EDITION_TEXELS + row * (JAKE_EDITION_W / 4u);
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)(EDITION_VRAM_Y + row) << 16) | EDITION_VRAM_X;
+        words[2] = (rows << 16) | (JAKE_EDITION_W / 4u);
+        for (k = 0; k < rows * row_words; ++k)
+            words[3 + k] = src[2 * k] | ((uint32_t)src[2 * k + 1] << 16);
+        jake_link_packet(far_entry, words, 3u + rows * row_words);
+    }
+}
+
+static void jake_draw_edition(uint32_t table, uint32_t index) {
+    const uint32_t clut = ((uint32_t)EDITION_CLUT_Y << 6) | (EDITION_CLUT_X >> 4);
+    const uint32_t page = (EDITION_VRAM_X / 64u) | ((EDITION_VRAM_Y / 256u) << 4);  /* 4-bit */
+    const uint32_t x0 = EDITION_X, y0 = EDITION_Y;
+    const uint32_t x1 = EDITION_X + EDITION_W, y1 = EDITION_Y + EDITION_H;
+    const uint32_t v0 = EDITION_VRAM_Y % 256u;            /* page rows start at 256 */
+    const uint32_t u1 = JAKE_EDITION_W - 1u, v1 = v0 + JAKE_EDITION_H - 1u;
+    uint32_t packet, old;
+    if (g_edition_quad[index] == 0u)
+        g_edition_quad[index] = psx_mod_alloc_gpu_dma_memory(64u, 16u);
+    packet = g_edition_quad[index];
+    if (packet == 0u)
+        return;
+    psx_mod_write_word(packet + 4u, 0x2D808080u);       /* quad, textured, raw */
+    psx_mod_write_word(packet + 8u, (y0 << 16) | x0);
+    psx_mod_write_word(packet + 12u, (clut << 16) | (v0 << 8));
+    psx_mod_write_word(packet + 16u, (y0 << 16) | x1);
+    psx_mod_write_word(packet + 20u, (page << 16) | (v0 << 8) | u1);
+    psx_mod_write_word(packet + 24u, (y1 << 16) | x0);
+    psx_mod_write_word(packet + 28u, v1 << 8);
+    psx_mod_write_word(packet + 32u, (y1 << 16) | x1);
+    psx_mod_write_word(packet + 36u, (v1 << 8) | u1);
+    old = psx_mod_read_word(table);                     /* entry 0: drawn last */
+    psx_mod_write_word(packet, (9u << 24) | (old & 0x00FFFFFFu));
+    psx_mod_write_word(table, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+}
+
 /* The frame's drawing is queued: give every swapped object its own mesh
  * back before anything animates it again. */
 static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
@@ -1380,9 +1454,14 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
             g_arena_index = (int)index;
             g_arena_used = 0u;
             jake_upload_face(table);
+            if (jake_on_title())
+                jake_upload_edition(table);
         }
-        if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu)
+        if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu) {
             jake_recolour_hud(table);
+            if (jake_on_title())
+                jake_draw_edition(table, index);
+        }
     }
     if (g_enabled && g_jake_mesh_ready)
         jake_patch_life();
