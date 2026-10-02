@@ -209,3 +209,17 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   still resident, so the code-word check alone showed the text over the demo. jake_on_title now also
   requires that the level Spike (0x800EC1E0, never drawn on the title) hasn't been transformed for 60 frames.
   Checked: text gone through the whole demo, back ~2 s after Start returns to the title.
+
+## 2026-10-02 Jake: cutscenes (Spike and Jake trade places)
+- In-engine cutscenes (e.g. the New Game intro) load their own copies of the cast, drawn by the same transform
+  0x80016A60 (called from the cutscene overlay, ra 0x8013988C) into their own OTs (DrawOTag a0 0x800F03CC /
+  0x800F4444, two per frame). Intro: Spike = obj 0x800BF97C with a Spike-mesh copy whose header differs only
+  at +10 (00 vs the level mesh's 01); Jake = obj 0x800BF960 with an 18-part cutscene mesh (header
+  22 00 27 01 12 00 0F 01 67 00 ..., passes jake_is_jake_mesh). Before: the Spike copy wasn't recognised and
+  Jake got the level Spike's mesh -> two Spikes.
+- Now: Spike header matched on its first 10 bytes; a non-level Spike seen within 4 DrawOTags of a Jake trades
+  meshes with him (each gets the other's own words, so the cutscene's loaded textures are right), Spike gets
+  Jake's live tail pose (jake_pose_tail_live). Without Jake around, the disc Jake mesh as before (title).
+  Unstick covers both directions. Tools: re/introlog.py (New Game from title save, logs screenshots +
+  transformed objects), re/press.py (pad taps).
+- Note: cutscene Jake's hair is his stock blue (cutscene texture); in-game Jake (disc face + HUD) is purple.

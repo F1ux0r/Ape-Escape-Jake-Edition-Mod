@@ -1131,6 +1131,17 @@ static void jake_pose_tail_rest(uint32_t matrices) {
     }
 }
 
+/* Jake's tail as his own skeleton holds it this frame, on another head. */
+static void jake_pose_tail_live(uint32_t matrices) {
+    JakeAffine head, tail;
+    int k;
+    jake_read_affine(jake_part_matrix(matrices, JAKE_HEAD_PART), &head);
+    for (k = 0; k < 2; ++k) {
+        jake_multiply(&head, &g_tail_rel[k], &tail);
+        jake_write_affine(jake_part_matrix(matrices, JAKE_TAIL_PART + k), &tail);
+    }
+}
+
 static void jake_capture_tail(uint32_t matrices) {
     JakeAffine head, inv, tail;
     int k;
@@ -1162,7 +1173,7 @@ static int jake_is_spike_header(uint32_t header) {
     uint32_t i;
     if (header < 0x80000000u || header >= 0x80200000u)
         return 0;
-    for (i = 0; i < sizeof(SPIKE_HEADER); ++i)
+    for (i = 0; i < 10u; ++i)      /* +10 differs in the cutscenes' copies */
         if (psx_mod_read_byte(header + i) != SPIKE_HEADER[i])
             return 0;
     return 1;
@@ -1211,6 +1222,12 @@ static void jake_swap_in(uint32_t object, const uint32_t mesh[JAKE_MESH_WORDS]) 
  * Spike's). Seen at the transform outside our own swap, it is put back first.
  */
 static uint32_t g_jake_object, g_jake_own[JAKE_MESH_WORDS];
+/* A scene's own Spike (title, cutscenes) and when each side was last seen:
+ * a pair seen within a few DrawOTags is in the same scene (cutscenes draw
+ * two tables a frame). */
+enum { JAKE_SCENE_FRAMES = 4 };
+static uint32_t g_other_spike_object, g_other_spike[JAKE_MESH_WORDS];
+static uint32_t g_other_spike_frame = 0x80000000u, g_jake_own_frame = 0x80000000u;
 /* Spike's model is resident at the same place in every level; used when a
  * stuck state is loaded before his own mesh words have been seen. */
 static const uint32_t SPIKE_MESH_RESIDENT[JAKE_MESH_WORDS] = {
@@ -1231,9 +1248,14 @@ static void jake_unstick(uint32_t object) {
         word0 == g_jake_mesh[0]) {
         for (i = 0; i < JAKE_MESH_WORDS; ++i)
             psx_mod_write_word(object + (uint32_t)i * 4u, g_spike_mesh[i]);
-    } else if (object == g_jake_object && g_have_spike && word0 == g_spike_mesh[0]) {
+    } else if (object == g_jake_object &&
+               ((g_have_spike && word0 == g_spike_mesh[0]) ||
+                (g_other_spike[0] != 0u && word0 == g_other_spike[0]))) {
         for (i = 0; i < JAKE_MESH_WORDS; ++i)
             psx_mod_write_word(object + (uint32_t)i * 4u, g_jake_own[i]);
+    } else if (object == g_other_spike_object && g_jake_own[0] != 0u && word0 == g_jake_own[0]) {
+        for (i = 0; i < JAKE_MESH_WORDS; ++i)
+            psx_mod_write_word(object + (uint32_t)i * 4u, g_other_spike[i]);
     }
 }
 
@@ -1260,9 +1282,28 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
         jake_swap_in(object, g_jake_mesh);
         return;
     }
-    /* Another Spike (the title screen's): Jake too, tail at rest. One left
-     * holding our copy by a savestate is still Jake, not Jake-in-a-race. */
+    /*
+     * Another Spike: the title screen's, or a cutscene's (the cutscenes load
+     * their own copies of the cast). With Jake in the same scene the two
+     * trade meshes - their textures are loaded for it - and Spike gets
+     * Jake's live tail pose; alone he gets Jake's mesh from the disc, tail at
+     * rest. One left holding our copy by a savestate is still Jake.
+     */
     if (jake_is_spike_header(header) || (g_jake_mesh_ready && header == g_jake_mesh[0])) {
+        if (header != g_jake_mesh[0]) {
+            g_other_spike_object = object;
+            jake_read_mesh(object, g_other_spike);
+            g_other_spike_frame = g_frame;
+        }
+        if (g_frame - g_jake_own_frame <= JAKE_SCENE_FRAMES &&
+            jake_is_jake_mesh(g_jake_own[0], g_jake_own[3])) {
+            if (g_have_tail && g_frame - g_tail_frame <= JAKE_SCENE_FRAMES)
+                jake_pose_tail_live(matrices);
+            else
+                jake_pose_tail_rest(matrices);
+            jake_swap_in(object, g_jake_own);
+            return;
+        }
         jake_prepare_mesh(object);
         if (!g_jake_mesh_ready)
             return;
@@ -1271,13 +1312,17 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
             jake_swap_in(object, g_jake_mesh);
         return;
     }
-    /* Jake himself (his race, cutscenes): he wears Spike. */
+    /* Jake himself (his race, cutscenes): he wears Spike - the scene's own
+     * Spike when there is one, else the level's. */
     if (!jake_is_jake_mesh(header, psx_mod_read_word(object + 0x0Cu)))
         return;
     jake_capture_tail(matrices);
     g_jake_object = object;
     jake_read_mesh(object, g_jake_own);
-    if (g_have_spike)
+    g_jake_own_frame = g_frame;
+    if (g_frame - g_other_spike_frame <= JAKE_SCENE_FRAMES && jake_is_spike_header(g_other_spike[0]))
+        jake_swap_in(object, g_other_spike);
+    else if (g_have_spike)
         jake_swap_in(object, g_spike_mesh);
 }
 
