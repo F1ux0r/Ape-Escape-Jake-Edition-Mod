@@ -205,3 +205,7 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   picture), linked after OT entry 0 so it's on the scene, under the menu.
 - BUG on the way: packet tag count 8 for a 9-word quad -> GPU ate the next command's word, whole title
   misparsed (font sheet where the logo was). Tag count = words after the tag, always.
+- 2026-10-02 fix: the attract demo (after ~45 s idle on the menu) plays a level with the title overlay code
+  still resident, so the code-word check alone showed the text over the demo. jake_on_title now also
+  requires that the level Spike (0x800EC1E0, never drawn on the title) hasn't been transformed for 60 frames.
+  Checked: text gone through the whole demo, back ~2 s after Start returns to the title.

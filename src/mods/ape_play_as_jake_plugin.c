@@ -253,7 +253,7 @@ static const JakeAffine JAKE_TAIL_REST[2] = {
       { -8.5f, -40.5f, 0.0f } },
 };
 static JakeAffine g_tail_rel[2];
-static uint32_t g_tail_frame, g_frame;
+static uint32_t g_tail_frame, g_frame, g_level_spike_frame = 0x80000000u;
 static uint8_t g_have_tail;
 
 /* ---- Disc -------------------------------------------------------------- */
@@ -1248,6 +1248,7 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
     header = psx_mod_read_word(object);
     matrices = psx_mod_read_word(object + 0x14u);
     if (object == JAKE_SPIKE_OBJECT) {
+        g_level_spike_frame = g_frame;
         if (jake_part_count(header) != JAKE_SPIKE_PARTS)
             return;
         jake_prepare_mesh(object);
@@ -1381,10 +1382,14 @@ enum {
     EDITION_W = 108, EDITION_H = 22
 };
 static uint32_t g_edition_quad[2];
+/* The attract demo plays a level with the title code still loaded; the
+ * level's own Spike (never drawn on the title) gives it away. */
+enum { EDITION_LEVEL_FRAMES = 60 };
 
 static int jake_on_title(void) {
     return psx_mod_read_word(0x80136930u) == 0x0C005870u &&   /* jal 0x800161C0 */
-           psx_mod_read_word(0x80136C94u) == 0x0C04DB40u;     /* jal 0x80136D00 */
+           psx_mod_read_word(0x80136C94u) == 0x0C04DB40u &&   /* jal 0x80136D00 */
+           g_frame - g_level_spike_frame > EDITION_LEVEL_FRAMES;
 }
 
 static void jake_upload_edition(uint32_t table) {
