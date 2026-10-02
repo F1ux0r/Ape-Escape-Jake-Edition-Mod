@@ -50,19 +50,11 @@ static const uint32_t JAKE_ORDERING_TABLE = 0x800EC3D0u;
 static const uint32_t JAKE_ORDERING_TABLE_STRIDE = 0x4078u;
 /* Our own GPU-DMA memory per buffer, never the game's packet buffer
  * (which the game may already be refilling while the GPU reads it). */
-enum { JAKE_ARENA_SIZE = 0x4000 };
+enum { JAKE_ARENA_SIZE = 0x6000 };
 static uint32_t g_arena[2], g_arena_used;
 static int g_arena_index;
 
-/* Disc user-data offsets (2048-byte sectors) in KKIIDDZZ.DAT. */
-static const uint32_t JAKE_DISC_MESH = 0x033E23ECu;
-static const uint32_t JAKE_DISC_MESH_SIZE = 0x1E38u;
-static const uint32_t JAKE_DISC_CLUT = 0x033BDCB0u;            /* 16 colours */
-static const uint32_t JAKE_DISC_IMAGE = 0x033BDCB0u + 0x2Cu;   /* packed */
-static const uint32_t JAKE_DISC_IMAGE_SIZE = 0x1C4u - 12u;
-static const uint8_t JAKE_MESH_SIGNATURE[12] = {
-    0x20, 0x00, 0x36, 0x01, 0x12, 0x00, 0x25, 0x01, 0x24, 0x00, 0x00, 0x00
-};
+/* Disc offsets below are user-data offsets (2048-byte sectors) in KKIIDDZZ.DAT. */
 
 /* Where the face goes: page 15 (x 960), texels at x 984..999, y 128..191,
  * palette at (960, 255). The stock texture is page 9 with the image at its
@@ -226,10 +218,36 @@ static uint8_t g_enabled;
 
 /* Jake's mesh from the disc, and once copied into guest memory the five
  * mesh words that point at it. */
-static uint8_t g_disc_mesh[0x1E38];
 static uint16_t g_face_clut[16];
 static uint16_t g_face_texels[JAKE_VRAM_W * JAKE_VRAM_H];
 static uint8_t g_disc_ok;
+
+/*
+ * Two looks, picked with L1 on the title screen and remembered in
+ * mods/play-as-jake.cfg: EVIL is Jake as he races you (the mesh above, red
+ * slanted eyes, purple hair on the HUD), NORMAL is Jake before Specter gets
+ * him, as in the opening cutscene (blue hair, big brown eyes). The normal
+ * mesh is the intro's (USA disc 0x008AE9D0; its face quads' uvs are already
+ * relative to the 64x64 face block, so the same retarget works), and its
+ * face is that cutscene's base face block (palette + packed image, same
+ * format). Both faces use the same VRAM slot and palette position.
+ */
+enum { JAKE_EVIL, JAKE_NORMAL, JAKE_LOOKS };
+static const struct {
+    uint32_t mesh, mesh_size, clut, image, image_size;
+    uint8_t signature[12];
+} JAKE_LOOK_DISC[JAKE_LOOKS] = {
+    { 0x033E23ECu, 0x1E38u, 0x033BDCB0u, 0x033BDCB0u + 0x2Cu, 0x1C4u - 12u,
+      { 0x20, 0x00, 0x36, 0x01, 0x12, 0x00, 0x25, 0x01, 0x24, 0x00, 0x00, 0x00 } },
+    { 0x008AE9D0u, 0x1D8Cu, 0x06625764u, 0x06625790u, 0x2CCu - 12u,
+      { 0x22, 0x00, 0x27, 0x01, 0x12, 0x00, 0x0F, 0x01, 0x67, 0x00, 0x00, 0x00 } },
+};
+static uint8_t g_look_mesh[JAKE_LOOKS][0x1E38];
+static uint16_t g_look_clut[JAKE_LOOKS][16];
+static uint16_t g_look_texels[JAKE_LOOKS][JAKE_VRAM_W * JAKE_VRAM_H];
+static uint32_t g_look_words[JAKE_LOOKS][5];
+static uint8_t g_look_ok[JAKE_LOOKS], g_look_built[JAKE_LOOKS];
+static int g_look = JAKE_EVIL;
 static uint32_t g_jake_mesh[JAKE_MESH_WORDS];
 static uint8_t g_jake_mesh_ready;
 
@@ -311,7 +329,7 @@ static int jake_read_disc(FILE* f, uint32_t offset, uint8_t* out, uint32_t size)
     return 1;
 }
 
-static void jake_unpack_face(const uint8_t* packed, uint32_t size) {
+static void jake_unpack_face(const uint8_t* packed, uint32_t size, uint16_t* texels) {
     uint8_t pixels[JAKE_VRAM_W * 4 * JAKE_VRAM_H];
     uint32_t i = 0, n = 0, k;
     memset(pixels, 0, sizeof(pixels));
@@ -328,30 +346,37 @@ static void jake_unpack_face(const uint8_t* packed, uint32_t size) {
         }
     }
     for (k = 0; k < JAKE_VRAM_W * JAKE_VRAM_H; ++k)
-        g_face_texels[k] = (uint16_t)(pixels[k * 4] | (pixels[k * 4 + 1] << 4) |
+        texels[k] = (uint16_t)(pixels[k * 4] | (pixels[k * 4 + 1] << 4) |
                                       (pixels[k * 4 + 2] << 8) | (pixels[k * 4 + 3] << 12));
 }
 
 static void jake_load_disc(void) {
     char path[1024];
-    uint8_t clut[32], packed[0x1C4];
+    uint8_t clut[32], packed[0x400];
     FILE* f;
-    int k;
+    int k, look;
     if (!jake_disc_path(path, sizeof(path)) || !(f = fopen(path, "rb"))) {
         fprintf(stderr, "play-as-jake: disc image not found\n");
         return;
     }
-    if (jake_read_disc(f, JAKE_DISC_MESH, g_disc_mesh, JAKE_DISC_MESH_SIZE) &&
-        jake_read_disc(f, JAKE_DISC_CLUT, clut, sizeof(clut)) &&
-        jake_read_disc(f, JAKE_DISC_IMAGE, packed, JAKE_DISC_IMAGE_SIZE) &&
-        memcmp(g_disc_mesh, JAKE_MESH_SIGNATURE, sizeof(JAKE_MESH_SIGNATURE)) == 0) {
-        for (k = 0; k < 16; ++k)
-            g_face_clut[k] = (uint16_t)(clut[k * 2] | (clut[k * 2 + 1] << 8));
-        jake_unpack_face(packed, JAKE_DISC_IMAGE_SIZE);
-        g_disc_ok = 1u;
-    } else {
-        fprintf(stderr, "play-as-jake: Jake's model was not found on this disc\n");
+    for (look = 0; look < JAKE_LOOKS; ++look) {
+        const uint32_t size = JAKE_LOOK_DISC[look].mesh_size;
+        if (jake_read_disc(f, JAKE_LOOK_DISC[look].mesh, g_look_mesh[look], size) &&
+            jake_read_disc(f, JAKE_LOOK_DISC[look].clut, clut, sizeof(clut)) &&
+            jake_read_disc(f, JAKE_LOOK_DISC[look].image, packed, JAKE_LOOK_DISC[look].image_size) &&
+            memcmp(g_look_mesh[look], JAKE_LOOK_DISC[look].signature, 12) == 0) {
+            for (k = 0; k < 16; ++k)
+                g_look_clut[look][k] = (uint16_t)(clut[k * 2] | (clut[k * 2 + 1] << 8));
+            jake_unpack_face(packed, JAKE_LOOK_DISC[look].image_size, g_look_texels[look]);
+            g_look_ok[look] = 1u;
+        } else {
+            fprintf(stderr, "play-as-jake: Jake's %s look was not found on this disc\n",
+                    look == JAKE_EVIL ? "evil" : "normal");
+        }
     }
+    g_disc_ok = g_look_ok[JAKE_EVIL];
+    if (!g_look_ok[g_look])
+        g_look = JAKE_EVIL;
     fclose(f);
 }
 
@@ -705,6 +730,8 @@ static void jake_spawn_vblank(void) {
     }
 }
 
+static void jake_click_vblank(void);
+
 static void jake_vblank(void) {
     static uint32_t ticks;
     if (!g_enabled)
@@ -713,6 +740,7 @@ static void jake_vblank(void) {
         jake_install_voice();
     jake_outro_vblank();
     jake_spawn_vblank();
+    jake_click_vblank();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
@@ -761,45 +789,72 @@ static int jake_retarget_polys(uint8_t* mesh, uint32_t polys, uint32_t end, uint
  * vertex list is followed by Spike's own vertices from 293 on: any such
  * index still lands on Spike's matching point instead of on polys.
  */
-static void jake_prepare_mesh(uint32_t spike_object) {
-    static uint8_t tried;
+static int jake_build_look(int look, uint32_t spike_object) {
     uint8_t mesh[0x1E38];
+    const uint32_t size = JAKE_LOOK_DISC[look].mesh_size;
     uint32_t base, colours, parts, verts, polys, k, jake_verts, spike_verts, vert_list;
-    if (tried || !g_disc_ok)
-        return;
-    tried = 1u;
-    memcpy(mesh, g_disc_mesh, sizeof(mesh));
+    memcpy(mesh, g_look_mesh[look], size);
     colours = 0x0Cu;
     parts = colours + jake_get16(mesh + 8) * 4u;
     verts = parts + jake_get16(mesh + 4) * JAKE_PART_ENTRY_SIZE;
     polys = verts + jake_get16(mesh + 6) * 8u;
-    if (polys >= sizeof(mesh) ||
-        !jake_retarget_polys(mesh, polys, sizeof(mesh), jake_get16(mesh + 2))) {
+    if (polys >= size || !jake_retarget_polys(mesh, polys, size, jake_get16(mesh + 2))) {
         fprintf(stderr, "play-as-jake: Jake's mesh did not parse\n");
-        return;
+        return 0;
     }
     jake_verts = jake_get16(mesh + 6);
     spike_verts = psx_mod_read_half(psx_mod_read_word(spike_object) + 6u);
     if (spike_verts < jake_verts)
         spike_verts = jake_verts;
-    base = psx_mod_alloc_guest_memory(sizeof(mesh) + spike_verts * 8u, 16u);
+    base = psx_mod_alloc_guest_memory(size + spike_verts * 8u, 16u);
     if (base == 0u)
-        return;
-    for (k = 0; k < sizeof(mesh); k += 4)
+        return 0;
+    for (k = 0; k < size; k += 4)
         psx_mod_write_word(base + k, (uint32_t)mesh[k] | ((uint32_t)mesh[k + 1] << 8) |
                                      ((uint32_t)mesh[k + 2] << 16) | ((uint32_t)mesh[k + 3] << 24));
-    vert_list = base + sizeof(mesh);
+    vert_list = base + size;
     for (k = 0; k < jake_verts * 8u; k += 4)
         psx_mod_write_word(vert_list + k, psx_mod_read_word(base + verts + k));
     for (; k < spike_verts * 8u; k += 4)
         psx_mod_write_word(vert_list + k,
                            psx_mod_read_word(psx_mod_read_word(spike_object + 0x10u) + k));
-    g_jake_mesh[0] = base;
-    g_jake_mesh[1] = base + colours;
-    g_jake_mesh[2] = base + polys;
-    g_jake_mesh[3] = base + parts;
-    g_jake_mesh[4] = vert_list;
+    g_look_words[look][0] = base;
+    g_look_words[look][1] = base + colours;
+    g_look_words[look][2] = base + polys;
+    g_look_words[look][3] = base + parts;
+    g_look_words[look][4] = vert_list;
+    return 1;
+}
+
+/* Make a look the current one: its mesh words and face (uploaded with the
+ * next batch). */
+static void jake_select_look(int look) {
+    if (!g_look_built[look])
+        return;
+    g_look = look;
+    memcpy(g_jake_mesh, g_look_words[look], sizeof(g_jake_mesh));
+    memcpy(g_face_clut, g_look_clut[look], sizeof(g_face_clut));
+    memcpy(g_face_texels, g_look_texels[look], sizeof(g_face_texels));
+}
+
+static void jake_prepare_mesh(uint32_t spike_object) {
+    static uint8_t tried;
+    int look;
+    if (tried || !g_disc_ok)
+        return;
+    tried = 1u;
+    for (look = 0; look < JAKE_LOOKS; ++look)
+        g_look_built[look] = g_look_ok[look] && jake_build_look(look, spike_object);
+    if (!g_look_built[JAKE_EVIL])
+        return;
+    jake_select_look(g_look_built[g_look] ? g_look : JAKE_EVIL);
     g_jake_mesh_ready = 1u;
+}
+
+/* One of our Jake meshes (either look). */
+static int jake_is_our_mesh(uint32_t header) {
+    return header != 0u && (header == g_look_words[JAKE_EVIL][0] ||
+                            header == g_look_words[JAKE_NORMAL][0]);
 }
 
 /*
@@ -821,6 +876,15 @@ static void jake_link_packet(uint32_t entry, const uint32_t* words, uint32_t cou
     for (k = 0; k < count; ++k)
         psx_mod_write_word(packet + 4u + k * 4u, words[k]);
     psx_mod_write_word(entry, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+}
+
+/* The HUD's purple hair (blue above red above green) turns blue for the
+ * NORMAL look by swapping red and green. */
+static uint16_t jake_look_colour(uint16_t c) {
+    const uint16_t r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
+    if (g_look != JAKE_NORMAL || !(b > r && r > g + 1u))
+        return c;
+    return (uint16_t)((c & 0x8000u) | g | (r << 5) | (b << 10));
 }
 
 static void jake_upload_face(uint32_t table) {
@@ -846,7 +910,8 @@ static void jake_upload_face(uint32_t table) {
         words[1] = ((uint32_t)icon->clut_y << 16) | icon->clut_x;
         words[2] = (1u << 16) | 16u;
         for (k = 0; k < 16; k += 2)
-            words[3 + k / 2] = icon->palette[k] | ((uint32_t)icon->palette[k + 1] << 16);
+            words[3 + k / 2] = jake_look_colour(icon->palette[k]) |
+                               ((uint32_t)jake_look_colour(icon->palette[k + 1]) << 16);
         jake_link_packet(far_entry, words, 3u + 8u);
     }
     words[0] = 0xA0000000u;
@@ -1238,14 +1303,14 @@ static void jake_unstick(uint32_t object) {
     const uint32_t word0 = psx_mod_read_word(object);
     int i;
     if (object == JAKE_SPIKE_OBJECT && !g_have_spike && g_jake_mesh_ready &&
-        word0 == g_jake_mesh[0] &&
+        jake_is_our_mesh(word0) &&
         jake_part_count(SPIKE_MESH_RESIDENT[0]) == JAKE_SPIKE_PARTS) {
         for (i = 0; i < JAKE_MESH_WORDS; ++i)
             g_spike_mesh[i] = SPIKE_MESH_RESIDENT[i];
         g_have_spike = 1u;
     }
     if (object == JAKE_SPIKE_OBJECT && g_have_spike && g_jake_mesh_ready &&
-        word0 == g_jake_mesh[0]) {
+        jake_is_our_mesh(word0)) {
         for (i = 0; i < JAKE_MESH_WORDS; ++i)
             psx_mod_write_word(object + (uint32_t)i * 4u, g_spike_mesh[i]);
     } else if (object == g_jake_object &&
@@ -1289,13 +1354,13 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
      * Jake's live tail pose; alone he gets Jake's mesh from the disc, tail at
      * rest. One left holding our copy by a savestate is still Jake.
      */
-    if (jake_is_spike_header(header) || (g_jake_mesh_ready && header == g_jake_mesh[0])) {
-        if (header != g_jake_mesh[0]) {
+    if (jake_is_spike_header(header) || (g_jake_mesh_ready && jake_is_our_mesh(header))) {
+        if (!jake_is_our_mesh(header)) {
             g_other_spike_object = object;
             jake_read_mesh(object, g_other_spike);
             g_other_spike_frame = g_frame;
         }
-        if (g_frame - g_jake_own_frame <= JAKE_SCENE_FRAMES &&
+        if (g_look == JAKE_NORMAL && g_frame - g_jake_own_frame <= JAKE_SCENE_FRAMES &&
             jake_is_jake_mesh(g_jake_own[0], g_jake_own[3])) {
             if (g_have_tail && g_frame - g_tail_frame <= JAKE_SCENE_FRAMES)
                 jake_pose_tail_live(matrices);
@@ -1307,8 +1372,11 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
         jake_prepare_mesh(object);
         if (!g_jake_mesh_ready)
             return;
-        jake_pose_tail_rest(matrices);
-        if (header != g_jake_mesh[0])
+        if (g_have_tail && g_frame - g_tail_frame <= JAKE_SCENE_FRAMES)
+            jake_pose_tail_live(matrices);
+        else
+            jake_pose_tail_rest(matrices);
+        if (!jake_is_our_mesh(header))
             jake_swap_in(object, g_jake_mesh);
         return;
     }
@@ -1418,15 +1486,20 @@ static void jake_recolour_hud(uint32_t table) {
  * pixels across a 4:3 picture, so the quad is 1.2x wider than the art.
  * The title screen is told by its code being loaded (two calls in it).
  */
-#include "ape_jake_edition.inc"
+#include "ape_jake_title_atlas.inc"
 enum {
-    EDITION_VRAM_X = 960, EDITION_VRAM_Y = 384,
-    EDITION_CLUT_X = 960, EDITION_CLUT_Y = 448,
-    EDITION_ROWS = 7,                   /* texel rows per copy packet */
-    EDITION_X = 208, EDITION_Y = 138,   /* screen box, top left */
-    EDITION_W = 108, EDITION_H = 22
+    ATLAS_VRAM_X = 960, ATLAS_VRAM_Y = 384,             /* 4-bit, rows 384..493 */
+    ATLAS_CLUT_Y = 494,                                 /* palettes at x 960, 976, 992 */
+    ATLAS_ROWS = 7,                                     /* texel rows per copy packet */
+    EDITION_X = 208, EDITION_Y = 138,                   /* screen boxes (384-wide picture) */
+    EDITION_W = 108, EDITION_H = 22,
+    FACE_X = 322, FACE_Y = 127, FACE_W = 44, FACE_H = 33,   /* beside JAKE EDITION */
+    LABEL_RIGHT = 316, LABEL_Y = 161, LABEL_H = 17,          /* under it, right-aligned */
+    HINT_CENTRE = 344, HINT_Y = 162, HINT_H = 13,            /* under the portrait */
+    TITLE_QUADS = 4
 };
-static uint32_t g_edition_quad[2];
+static uint32_t g_title_quads[2];
+static uint8_t g_force_upload;
 /* The attract demo plays a level with the title code still loaded; the
  * level's own Spike (never drawn on the title) gives it away. */
 enum { EDITION_LEVEL_FRAMES = 60 };
@@ -1437,54 +1510,176 @@ static int jake_on_title(void) {
            g_frame - g_level_spike_frame > EDITION_LEVEL_FRAMES;
 }
 
-static void jake_upload_edition(uint32_t table) {
+static void jake_upload_title(uint32_t table) {
     const uint32_t far_entry = table + 0x3FFCu;
-    const uint32_t row_words = JAKE_EDITION_W / 8u;   /* 4 texels a halfword */
-    uint32_t words[3 + EDITION_ROWS * JAKE_EDITION_W / 8];
-    uint32_t row, k;
-    words[0] = 0xA0000000u;
-    words[1] = ((uint32_t)EDITION_CLUT_Y << 16) | EDITION_CLUT_X;
-    words[2] = (1u << 16) | 16u;
-    for (k = 0; k < 16; k += 2)
-        words[3 + k / 2] = JAKE_EDITION_PALETTE[k] | ((uint32_t)JAKE_EDITION_PALETTE[k + 1] << 16);
-    jake_link_packet(far_entry, words, 3u + 8u);
-    for (row = 0; row < JAKE_EDITION_H; row += EDITION_ROWS) {
-        const uint32_t rows = JAKE_EDITION_H - row < EDITION_ROWS ? JAKE_EDITION_H - row : EDITION_ROWS;
-        const uint16_t* src = JAKE_EDITION_TEXELS + row * (JAKE_EDITION_W / 4u);
+    const uint32_t row_words = TITLE_ATLAS_W / 8u;      /* 4 texels a halfword */
+    uint32_t words[3 + ATLAS_ROWS * TITLE_ATLAS_W / 8];
+    uint32_t row, k, p;
+    for (p = 0; p < TITLE_PALETTES; ++p) {
         words[0] = 0xA0000000u;
-        words[1] = ((uint32_t)(EDITION_VRAM_Y + row) << 16) | EDITION_VRAM_X;
-        words[2] = (rows << 16) | (JAKE_EDITION_W / 4u);
+        words[1] = ((uint32_t)ATLAS_CLUT_Y << 16) | (ATLAS_VRAM_X + p * 16u);
+        words[2] = (1u << 16) | 16u;
+        for (k = 0; k < 16; k += 2)
+            words[3 + k / 2] = TITLE_ATLAS_PALETTES[p][k] |
+                               ((uint32_t)TITLE_ATLAS_PALETTES[p][k + 1] << 16);
+        jake_link_packet(far_entry, words, 3u + 8u);
+    }
+    for (row = 0; row < TITLE_ATLAS_H; row += ATLAS_ROWS) {
+        const uint32_t rows = TITLE_ATLAS_H - row < ATLAS_ROWS ? TITLE_ATLAS_H - row : ATLAS_ROWS;
+        const uint16_t* src = TITLE_ATLAS_TEXELS + row * (TITLE_ATLAS_W / 4u);
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)(ATLAS_VRAM_Y + row) << 16) | ATLAS_VRAM_X;
+        words[2] = (rows << 16) | (TITLE_ATLAS_W / 4u);
         for (k = 0; k < rows * row_words; ++k)
             words[3 + k] = src[2 * k] | ((uint32_t)src[2 * k + 1] << 16);
         jake_link_packet(far_entry, words, 3u + rows * row_words);
     }
 }
 
-static void jake_draw_edition(uint32_t table, uint32_t index) {
-    const uint32_t clut = ((uint32_t)EDITION_CLUT_Y << 6) | (EDITION_CLUT_X >> 4);
-    const uint32_t page = (EDITION_VRAM_X / 64u) | ((EDITION_VRAM_Y / 256u) << 4);  /* 4-bit */
-    const uint32_t x0 = EDITION_X, y0 = EDITION_Y;
-    const uint32_t x1 = EDITION_X + EDITION_W, y1 = EDITION_Y + EDITION_H;
-    const uint32_t v0 = EDITION_VRAM_Y % 256u;            /* page rows start at 256 */
-    const uint32_t u1 = JAKE_EDITION_W - 1u, v1 = v0 + JAKE_EDITION_H - 1u;
-    uint32_t packet, old;
-    if (g_edition_quad[index] == 0u)
-        g_edition_quad[index] = psx_mod_alloc_gpu_dma_memory(64u, 16u);
-    packet = g_edition_quad[index];
-    if (packet == 0u)
-        return;
+/* One raw-textured quad (tag + 9 words) from an atlas rectangle. */
+static void jake_title_quad(uint32_t packet, const TitleRect* r, uint32_t palette,
+                            int32_t x0, int32_t y0, int32_t w, int32_t h) {
+    const uint32_t clut = ((uint32_t)ATLAS_CLUT_Y << 6) | ((ATLAS_VRAM_X + palette * 16u) >> 4);
+    const uint32_t page = (ATLAS_VRAM_X / 64u) | ((ATLAS_VRAM_Y / 256u) << 4);
+    const uint32_t v0 = ATLAS_VRAM_Y % 256u + r->v, v1 = v0 + r->h - 1u;
+    const uint32_t u0 = r->u, u1 = r->u + r->w - 1u;
+    const uint32_t x1 = (uint32_t)(x0 + w) & 0xFFFFu, y1 = (uint32_t)(y0 + h) & 0xFFFFu;
+    const uint32_t xa = (uint32_t)x0 & 0xFFFFu, ya = (uint32_t)y0 & 0xFFFFu;
     psx_mod_write_word(packet + 4u, 0x2D808080u);       /* quad, textured, raw */
-    psx_mod_write_word(packet + 8u, (y0 << 16) | x0);
-    psx_mod_write_word(packet + 12u, (clut << 16) | (v0 << 8));
-    psx_mod_write_word(packet + 16u, (y0 << 16) | x1);
+    psx_mod_write_word(packet + 8u, (ya << 16) | xa);
+    psx_mod_write_word(packet + 12u, (clut << 16) | (v0 << 8) | u0);
+    psx_mod_write_word(packet + 16u, (ya << 16) | x1);
     psx_mod_write_word(packet + 20u, (page << 16) | (v0 << 8) | u1);
-    psx_mod_write_word(packet + 24u, (y1 << 16) | x0);
-    psx_mod_write_word(packet + 28u, v1 << 8);
+    psx_mod_write_word(packet + 24u, (y1 << 16) | xa);
+    psx_mod_write_word(packet + 28u, (v1 << 8) | u0);
     psx_mod_write_word(packet + 32u, (y1 << 16) | x1);
     psx_mod_write_word(packet + 36u, (v1 << 8) | u1);
+}
+
+/* "JAKE EDITION", and the look in use: its portrait, its name and the L1
+ * hint. Linked after OT entry 0: on the scene, under the menu. The picture
+ * is 384 pixels across a 4:3 screen, so art is drawn 1.2x wide. */
+static void jake_draw_title(uint32_t table, uint32_t index) {
+    const int normal = g_look == JAKE_NORMAL;
+    const TitleRect* label = normal ? &TITLE_NORMAL : &TITLE_EVIL;
+    const int32_t label_w = (int32_t)(label->w * LABEL_H * 12 / (label->h * 10));
+    const int32_t hint_w = (int32_t)(TITLE_HINT.w * HINT_H * 12 / (TITLE_HINT.h * 10));
+    uint32_t packet, old, q;
+    if (g_title_quads[index] == 0u)
+        g_title_quads[index] = psx_mod_alloc_gpu_dma_memory(TITLE_QUADS * 40u, 16u);
+    packet = g_title_quads[index];
+    if (packet == 0u)
+        return;
+    jake_title_quad(packet, &TITLE_EDITION, TITLE_TEXT_PALETTE,
+                    EDITION_X, EDITION_Y, EDITION_W, EDITION_H);
+    jake_title_quad(packet + 40u, normal ? &TITLE_FACE_NORMAL : &TITLE_FACE_EVIL,
+                    normal ? TITLE_NORMAL_PALETTE : TITLE_EVIL_PALETTE,
+                    FACE_X, FACE_Y, FACE_W, FACE_H);
+    jake_title_quad(packet + 80u, label, TITLE_TEXT_PALETTE,
+                    LABEL_RIGHT - label_w, LABEL_Y, label_w, LABEL_H);
+    jake_title_quad(packet + 120u, &TITLE_HINT, TITLE_TEXT_PALETTE,
+                    HINT_CENTRE - hint_w / 2, HINT_Y, hint_w, HINT_H);
     old = psx_mod_read_word(table);                     /* entry 0: drawn last */
-    psx_mod_write_word(packet, (9u << 24) | (old & 0x00FFFFFFu));
-    psx_mod_write_word(table, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+    for (q = TITLE_QUADS; q-- > 0u;) {
+        const uint32_t at = packet + q * 40u;
+        psx_mod_write_word(at, (9u << 24) | (old & 0x00FFFFFFu));
+        old = (old & 0xFF000000u) | (at & 0x00FFFFFFu);
+    }
+    psx_mod_write_word(table, old);
+}
+
+/* ---- The look toggle --------------------------------------------------- */
+
+static const char JAKE_LOOK_FILE[] = "mods/play-as-jake.cfg";
+/* Pad 1 as the driver left it: +2 buttons, active low; L1 = bit 10. */
+static const uint32_t JAKE_PAD1_BUTTONS = 0x800E52D2u;
+enum { JAKE_PAD_L1 = 1 << 10 };
+
+static void jake_load_look_setting(void) {
+    char text[32] = { 0 };
+    FILE* f = fopen(JAKE_LOOK_FILE, "rb");
+    if (!f)
+        return;
+    if (fread(text, 1, sizeof(text) - 1, f) > 0 && strncmp(text, "look=normal", 11) == 0)
+        g_look = JAKE_NORMAL;
+    fclose(f);
+}
+
+static void jake_save_look_setting(void) {
+    FILE* f = fopen(JAKE_LOOK_FILE, "wb");
+    if (!f)
+        return;
+    fputs(g_look == JAKE_NORMAL ? "look=normal\n" : "look=evil\n", f);
+    fclose(f);
+}
+
+/*
+ * A switch click: the title menu's cursor sample (SPU 0x2BFC0, pitch
+ * 0x344), a little higher for NORMAL and lower for EVIL, on a voice the
+ * sound driver has free, claimed in its voice record (0x800E07F0, 0x66
+ * each: +0 busy, +0x1A no-steal) until it has played.
+ */
+static const uint32_t SPU_VOICE_BASE = 0x1F801C00u, SPU_KEY_ON_LOW = 0x1F801D88u;
+static const uint32_t SND_VOICE_RECORDS = 0x800E07F0u;
+enum { SPU_VOICES = 24, SND_RECORD_SIZE = 0x66, CLICK_SAMPLE = 0x2BFC0, CLICK_FRAMES = 30 };
+static int g_click_voice = -1;
+static uint32_t g_click_frames;
+
+static void jake_release_click(void) {
+    if (g_click_voice >= 0) {
+        const uint32_t record = SND_VOICE_RECORDS + (uint32_t)g_click_voice * SND_RECORD_SIZE;
+        if (psx_mod_read_half(record + 0x1Au) == 1u) {
+            psx_mod_write_half(record + 0x1Au, 0u);
+            psx_mod_write_half(record + 0x00u, 0u);
+        }
+    }
+    g_click_voice = -1;
+}
+
+static void jake_play_click(uint16_t pitch) {
+    int voice;
+    uint32_t base;
+    jake_release_click();
+    for (voice = SPU_VOICES - 1; voice >= 0; --voice)
+        if (psx_mod_read_half(SND_VOICE_RECORDS + (uint32_t)voice * SND_RECORD_SIZE) == 0u &&
+            psx_mod_read_half(SPU_VOICE_BASE + (uint32_t)voice * 0x10u + 0xCu) == 0u)
+            break;
+    if (voice < 0)
+        return;
+    psx_mod_write_half(SND_VOICE_RECORDS + (uint32_t)voice * SND_RECORD_SIZE + 0x00u, 1u);
+    psx_mod_write_half(SND_VOICE_RECORDS + (uint32_t)voice * SND_RECORD_SIZE + 0x1Au, 1u);
+    g_click_voice = voice;
+    g_click_frames = 0u;
+    base = SPU_VOICE_BASE + (uint32_t)voice * 0x10u;
+    psx_mod_write_half(base + 0x0u, 0x290Au);
+    psx_mod_write_half(base + 0x2u, 0x290Au);
+    psx_mod_write_half(base + 0x4u, pitch);
+    psx_mod_write_half(base + 0x6u, (uint16_t)(CLICK_SAMPLE >> 3));
+    psx_mod_write_half(base + 0x8u, 0x80FFu);
+    psx_mod_write_half(base + 0xAu, 0x5FC0u);
+    psx_mod_write_half(SPU_KEY_ON_LOW + (voice >= 16 ? 2u : 0u), (uint16_t)(1u << (voice & 15)));
+}
+
+/* Called every VBlank: give the voice back once the click has played. */
+static void jake_click_vblank(void) {
+    if (g_click_voice >= 0 && ++g_click_frames > CLICK_FRAMES)
+        jake_release_click();
+}
+
+/* On the title: L1 (pressed, not held) switches the look. */
+static void jake_title_input(void) {
+    static uint16_t was;
+    const uint16_t pressed = (uint16_t)~psx_mod_read_half(JAKE_PAD1_BUTTONS);
+    if ((pressed & JAKE_PAD_L1) && !(was & JAKE_PAD_L1)) {
+        const int next = g_look == JAKE_NORMAL ? JAKE_EVIL : JAKE_NORMAL;
+        if (g_look_built[next]) {
+            jake_select_look(next);
+            jake_save_look_setting();
+            jake_play_click(next == JAKE_NORMAL ? 0x3E0u : 0x2C0u);
+            g_force_upload = 1u;
+        }
+    }
+    was = pressed;
 }
 
 /* The frame's drawing is queued: give every swapped object its own mesh
@@ -1498,19 +1693,22 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     for (index = 0u; index < 2u; ++index) {
         const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;
         if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu &&
-            uploads++ % JAKE_UPLOAD_PERIOD == 0u) {
+            (uploads++ % JAKE_UPLOAD_PERIOD == 0u || g_force_upload)) {
+            g_force_upload = 0u;
             if (g_arena[index] == 0u)
                 g_arena[index] = psx_mod_alloc_gpu_dma_memory(JAKE_ARENA_SIZE, 16u);
             g_arena_index = (int)index;
             g_arena_used = 0u;
             jake_upload_face(table);
             if (jake_on_title())
-                jake_upload_edition(table);
+                jake_upload_title(table);
         }
         if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu) {
             jake_recolour_hud(table);
-            if (jake_on_title())
-                jake_draw_edition(table, index);
+            if (jake_on_title()) {
+                jake_title_input();
+                jake_draw_title(table, index);
+            }
         }
     }
     if (g_enabled && g_jake_mesh_ready)
@@ -1541,6 +1739,7 @@ static void jake_load_voice(void) {
 
 static void jake_activate(void) {
     g_enabled = 1u;
+    jake_load_look_setting();
     jake_load_disc();
     jake_load_voice();
 }

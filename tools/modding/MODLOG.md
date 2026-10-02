@@ -223,3 +223,27 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   Unstick covers both directions. Tools: re/introlog.py (New Game from title save, logs screenshots +
   transformed objects), re/press.py (pad taps).
 - Note: cutscene Jake's hair is his stock blue (cutscene texture); in-game Jake (disc face + HUD) is purple.
+
+## 2026-10-02 Jake: NORMAL / EVIL look, picked with L1 on the title
+- EVIL = the race Jake (mesh 0x033E23EC, face clut 0x033BDCB0, red slanted eyes; purple hair on the HUD).
+  NORMAL = Jake before Specter: the intro cutscene's mesh (disc user offset 0x008AE9D0, 0x1D8C bytes, header
+  22 00 27 01 12 00 0F 01 67 00 00 00; only 3 textured quads - eyes/mouth - whose uvs are relative to the
+  64x64 face block, so the race retarget (+96,+128, page 15, palette (960,255)) works unchanged) and the
+  intro's base face block (container at 0x06625754: palette 0x06625764, image hdr 0x06625784 = 768,64 16x64,
+  packed 0x06625790, 0x2C0 bytes; same nibble RLE). Found by dumping RAM/VRAM in the intro (re/cutjake.py),
+  then disc search: the mesh is on the disc 5x (only the face quads differ = per-file texture placement);
+  the cutscenes keep eye/mouth expression frames as separate packed pieces (16x48 eyes, 16x16 mouths) next
+  to a base block per character; Jake's base block = piece at (768,64).
+- Plugin: both looks loaded from the disc and built at the first Spike transform; jake_select_look copies the
+  chosen one into g_jake_mesh / g_face_*; jake_is_our_mesh covers both. HUD palettes: NORMAL swaps r/g of
+  purple colours (b > r > g+1) -> blue hair. Cutscenes: NORMAL = Spike/Jake trade (cutscene textures, animated
+  face); EVIL = Spike gets the evil disc mesh (face from our VRAM slot, which the intro leaves alone), Jake
+  still wears the scene's Spike.
+- Title UI (art/title_atlas.py -> src/mods/ape_jake_title_atlas.inc, our own art): 256x110 4-bit atlas at
+  (960,384) (palettes at (960/976/992, 494)): JAKE EDITION, NORMAL/EVIL labels (Luckiest Guy - Knewave's V
+  reads as I small), "L1" hint, two 36x32 portraits (art/portrait.py: HUD icon doubled + hand-drawn eyes).
+  4 quads linked after OT entry 0. L1 edge (pad 0x800E52D2 bit 10, active low) switches, saves
+  mods/play-as-jake.cfg ("look=normal|evil"), forces an upload, plays the menu cursor sample (SPU 0x2BFC0,
+  pitch 0x3E0 normal / 0x2C0 evil; stock 0x344) on a claimed free voice.
+- BUG on the way: upload arena 0x4000 overflowed with the bigger atlas -> last copy packets silently dropped
+  (bottom rows garbage). Arena now 0x6000.

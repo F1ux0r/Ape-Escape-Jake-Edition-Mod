@@ -18,6 +18,15 @@ def upright(ch, font, angle):
     return m.crop(m.getbbox())
 E.letter_mask = upright
 
+def build_rgba():
+    font = E.ImageFont.truetype(FONT, 44 * E.SS)
+    face = E.layout("JAKE EDITION", font, (-8, 6, -4, 9, 0, -6, 7, -3, 5, -7, 4, -5),
+                    [b * E.SS for b in (0, -4, 3, -2, 0, 4, -3, 2, -4, 3, -2, 1)],
+                    gap=-2 * E.SS, space=12 * E.SS)
+    im = E.style(face, outline=2 * E.SS, depth=7 * E.SS, rim=E.SS)
+    w = TEX_W - 2
+    return im.resize((w, round(im.height * w / im.width)), Image.LANCZOS)
+
 def build():
     font = E.ImageFont.truetype(FONT, 44 * E.SS)
     face = E.layout("JAKE EDITION", font, (-8, 6, -4, 9, 0, -6, 7, -3, 5, -7, 4, -5),
