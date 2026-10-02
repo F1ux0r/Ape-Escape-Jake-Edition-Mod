@@ -1121,6 +1121,16 @@ static void jake_pose_tail(uint32_t matrices) {
     }
 }
 
+static void jake_pose_tail_rest(uint32_t matrices) {
+    JakeAffine head, tail;
+    int k;
+    jake_read_affine(jake_part_matrix(matrices, JAKE_HEAD_PART), &head);
+    for (k = 0; k < 2; ++k) {
+        jake_multiply(&head, &JAKE_TAIL_REST[k], &tail);
+        jake_write_affine(jake_part_matrix(matrices, JAKE_TAIL_PART + k), &tail);
+    }
+}
+
 static void jake_capture_tail(uint32_t matrices) {
     JakeAffine head, inv, tail;
     int k;
@@ -1143,6 +1153,21 @@ static uint16_t jake_part_count(uint32_t header) {
 
 /* Jake's mesh as a level loads it: 18 parts, the tail's two parts chained
  * off the head (part table parent field is the parent's index + 1). */
+/* Spike's mesh header (colours, polys, parts, verts, ...) wherever it was
+ * loaded: in levels at 0x801030BC, on the title screen elsewhere. */
+static const uint8_t SPIKE_HEADER[12] = {
+    0x1C, 0x00, 0x68, 0x01, 0x10, 0x00, 0x48, 0x01, 0x50, 0x00, 0x01, 0x00
+};
+static int jake_is_spike_header(uint32_t header) {
+    uint32_t i;
+    if (header < 0x80000000u || header >= 0x80200000u)
+        return 0;
+    for (i = 0; i < sizeof(SPIKE_HEADER); ++i)
+        if (psx_mod_read_byte(header + i) != SPIKE_HEADER[i])
+            return 0;
+    return 1;
+}
+
 static int jake_is_jake_mesh(uint32_t header, uint32_t parts) {
     if (header < 0x80000000u || header >= 0x80200000u ||
         jake_part_count(header) != JAKE_JAKE_PARTS)
@@ -1232,6 +1257,17 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
         g_have_spike = 1u;
         jake_pose_tail(matrices);
         jake_swap_in(object, g_jake_mesh);
+        return;
+    }
+    /* Another Spike (the title screen's): Jake too, tail at rest. One left
+     * holding our copy by a savestate is still Jake, not Jake-in-a-race. */
+    if (jake_is_spike_header(header) || (g_jake_mesh_ready && header == g_jake_mesh[0])) {
+        jake_prepare_mesh(object);
+        if (!g_jake_mesh_ready)
+            return;
+        jake_pose_tail_rest(matrices);
+        if (header != g_jake_mesh[0])
+            jake_swap_in(object, g_jake_mesh);
         return;
     }
     /* Jake himself (his race, cutscenes): he wears Spike. */

@@ -183,3 +183,11 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   sector in 51084..51244 until 30 frames after 51244, then 6-frame fade back; 150-frame cap. Level music is
   sequenced (SPU), so nothing else is lost. Measured (re/spawnmute.py): muted before CD push began, all
   51744 pushed frames (= 1.17 s) went out muted, volume restored 1.55 s after start.
+
+## 2026-10-02 Jake: title screen
+- The title screen's running Spike is another object (0x80137850, mesh loaded at 0x80154020, matrices in the
+  shared buffer 0x800E9C60), drawn by the same transform 0x80016A60 (found with fn_filter/fn_entry_tail on it).
+  Its mesh header bytes equal level Spike's (1C00 6801 1000 4801 5000 0100), so the transform hook now swaps
+  Jake into ANY object with Spike's header, tail posed at rest (the sway physics track the level Spike only).
+  An object stuck holding our copy (savestate) is still treated as Jake, not as race-Jake. Checked: title
+  (debug slot 0), level (9) and race (10) all still right.
