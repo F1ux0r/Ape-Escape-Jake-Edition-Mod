@@ -173,3 +173,13 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   the cached entry stops matching; identified by counts + verts 0/18/19): every poly's palette -> navy
   palette uploaded at (960,254) with the other Jake palettes (whites mapped to navy too = no stripe);
   sleeves folded: 2->1, 14->13, 3->4, 15->16 and 11->0, 5->12, 10->9, 17->8 (re/lifemesh.py dumps mesh/texture).
+
+## 2026-10-02 Jake: Spike's warp-in "I'm going for it!" muted
+- It's CD-XA, not SPU: file 1, channel 1 of the voice interleave starting LBA 51083 (16 channels; ch1 sectors
+  51084 + 16n, 11 sectors to 51244 which has the EOF flag; coding 0x05 = 18.9 kHz, mono in stereo, 1.17 s).
+  Found by logging cdrom_sector_history on the user's warp-in save (menu slot 3 = debug 2); SPU key-ons in the
+  window had no Spike voice. Other channels of that interleave are other ~1.2-1.7 s clips (not identified).
+- Fix (jake_spawn_vblank, same idea as the outro): CD input volume held at 0 from the first delivered ch1
+  sector in 51084..51244 until 30 frames after 51244, then 6-frame fade back; 150-frame cap. Level music is
+  sequenced (SPU), so nothing else is lost. Measured (re/spawnmute.py): muted before CD push began, all
+  51744 pushed frames (= 1.17 s) went out muted, volume restored 1.55 s after start.

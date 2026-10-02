@@ -635,6 +635,76 @@ static void jake_outro_vblank(void) {
     }
 }
 
+/*
+ * Spike's "I'm going for it!" as he warps into a level is a CD-XA clip of
+ * its own: file 1, channel 1 of the voice interleave at LBA 51083 (16
+ * channels, so the channel's sectors are 51084 + 16n; 11 sectors, 1.17 s
+ * mono at 18.9 kHz, the last flagged end-of-file). Nothing else streams from
+ * the CD then (level music is sequenced), so the CD input is muted from the
+ * clip's first delivered sector until a while after its last one.
+ */
+enum {
+    SPAWN_XA_FILE = 1,
+    SPAWN_XA_CHANNEL = 1,
+    SPAWN_XA_FIRST_LBA = 51084,
+    SPAWN_XA_LAST_LBA = 51244,
+    SPAWN_TAIL_FRAMES = 30,             /* the SPU's CD buffer plays out */
+    SPAWN_MAX_MUTE_FRAMES = 150
+};
+
+static struct {
+    uint64_t seen;
+    uint8_t muting, started;
+    uint32_t tail, fade, frames;
+    uint16_t volume[2];
+} g_spawn;
+
+static void jake_spawn_vblank(void) {
+    const CDROMSectorHistoryEntry* entries = NULL;
+    const uint64_t total = cdrom_debug_get_sector_history(&entries);
+    uint64_t seq = g_spawn.seen;
+    if (!g_spawn.started) {
+        g_spawn.started = 1u;
+        g_spawn.seen = total;
+        return;
+    }
+    if (total - seq > CDROM_SECTOR_HISTORY_CAP)
+        seq = total - CDROM_SECTOR_HISTORY_CAP;
+    for (; entries && seq < total; ++seq) {
+        const CDROMSectorHistoryEntry* e = &entries[seq % CDROM_SECTOR_HISTORY_CAP];
+        if (e->seq != seq || e->xa_file != SPAWN_XA_FILE || e->xa_channel != SPAWN_XA_CHANNEL ||
+            !e->xa_audio_delivered || e->lba < SPAWN_XA_FIRST_LBA || e->lba > SPAWN_XA_LAST_LBA)
+            continue;
+        if (!g_spawn.muting) {
+            g_spawn.muting = 1u;
+            g_spawn.fade = 0u;
+            g_spawn.frames = 0u;
+            g_spawn.volume[0] = psx_mod_read_half(SPU_CD_VOLUME_LEFT);
+            g_spawn.volume[1] = psx_mod_read_half(SPU_CD_VOLUME_RIGHT);
+        }
+        g_spawn.tail = e->lba == SPAWN_XA_LAST_LBA ? SPAWN_TAIL_FRAMES : 0u;
+    }
+    g_spawn.seen = total;
+    if (g_spawn.muting && ((g_spawn.tail > 0u && --g_spawn.tail == 0u) ||
+                           ++g_spawn.frames > SPAWN_MAX_MUTE_FRAMES)) {
+        g_spawn.muting = 0u;
+        g_spawn.fade = OUTRO_FADE_FRAMES;
+    }
+    if (g_spawn.muting) {
+        const uint16_t l = psx_mod_read_half(SPU_CD_VOLUME_LEFT);
+        const uint16_t r = psx_mod_read_half(SPU_CD_VOLUME_RIGHT);
+        if (l != 0u || r != 0u) {
+            g_spawn.volume[0] = l;
+            g_spawn.volume[1] = r;
+        }
+        jake_set_cd_volume(0u, 0u);
+    } else if (g_spawn.fade > 0u) {
+        const int32_t step = OUTRO_FADE_FRAMES - (int32_t)--g_spawn.fade;
+        jake_set_cd_volume((uint16_t)((int16_t)g_spawn.volume[0] * step / OUTRO_FADE_FRAMES),
+                           (uint16_t)((int16_t)g_spawn.volume[1] * step / OUTRO_FADE_FRAMES));
+    }
+}
+
 static void jake_vblank(void) {
     static uint32_t ticks;
     if (!g_enabled)
@@ -642,6 +712,7 @@ static void jake_vblank(void) {
     if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
     jake_outro_vblank();
+    jake_spawn_vblank();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
