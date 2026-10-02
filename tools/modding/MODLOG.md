@@ -247,3 +247,6 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   pitch 0x3E0 normal / 0x2C0 evil; stock 0x344) on a claimed free voice.
 - BUG on the way: upload arena 0x4000 overflowed with the bigger atlas -> last copy packets silently dropped
   (bottom rows garbage). Arena now 0x6000.
+- 2026-10-02 title declutter (user: "looks cluttered"): portraits and the L1 hint removed; only the look's
+  word (NORMAL / EVIL, Luckiest Guy) beside JAKE EDITION, centred at x 348, 15 px tall. Atlas now 256x86
+  (edition + both words), one palette. JAKE EDITION moved to x 201 to leave a gap. art/portrait.py unused.

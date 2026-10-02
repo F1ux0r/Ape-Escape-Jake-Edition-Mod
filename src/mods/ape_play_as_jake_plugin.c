@@ -1488,15 +1488,13 @@ static void jake_recolour_hud(uint32_t table) {
  */
 #include "ape_jake_title_atlas.inc"
 enum {
-    ATLAS_VRAM_X = 960, ATLAS_VRAM_Y = 384,             /* 4-bit, rows 384..493 */
-    ATLAS_CLUT_Y = 494,                                 /* palettes at x 960, 976, 992 */
+    ATLAS_VRAM_X = 960, ATLAS_VRAM_Y = 384,             /* 4-bit, rows 384..469 */
+    ATLAS_CLUT_Y = 494,                                 /* palette at (960, 494) */
     ATLAS_ROWS = 7,                                     /* texel rows per copy packet */
-    EDITION_X = 208, EDITION_Y = 138,                   /* screen boxes (384-wide picture) */
+    EDITION_X = 201, EDITION_Y = 138,                   /* screen boxes (384-wide picture) */
     EDITION_W = 108, EDITION_H = 22,
-    FACE_X = 322, FACE_Y = 127, FACE_W = 44, FACE_H = 33,   /* beside JAKE EDITION */
-    LABEL_RIGHT = 316, LABEL_Y = 161, LABEL_H = 17,          /* under it, right-aligned */
-    HINT_CENTRE = 344, HINT_Y = 162, HINT_H = 13,            /* under the portrait */
-    TITLE_QUADS = 4
+    LABEL_CENTRE = 348, LABEL_Y = 141, LABEL_H = 15,         /* beside JAKE EDITION */
+    TITLE_QUADS = 2
 };
 static uint32_t g_title_quads[2];
 static uint8_t g_force_upload;
@@ -1556,14 +1554,13 @@ static void jake_title_quad(uint32_t packet, const TitleRect* r, uint32_t palett
     psx_mod_write_word(packet + 36u, (v1 << 8) | u1);
 }
 
-/* "JAKE EDITION", and the look in use: its portrait, its name and the L1
- * hint. Linked after OT entry 0: on the scene, under the menu. The picture
- * is 384 pixels across a 4:3 screen, so art is drawn 1.2x wide. */
+/* "JAKE EDITION" and, beside it, the look in use (NORMAL / EVIL). Linked
+ * after OT entry 0: on the scene, under the menu. The picture is 384
+ * pixels across a 4:3 screen, so art is drawn 1.2x wide. */
 static void jake_draw_title(uint32_t table, uint32_t index) {
     const int normal = g_look == JAKE_NORMAL;
     const TitleRect* label = normal ? &TITLE_NORMAL : &TITLE_EVIL;
     const int32_t label_w = (int32_t)(label->w * LABEL_H * 12 / (label->h * 10));
-    const int32_t hint_w = (int32_t)(TITLE_HINT.w * HINT_H * 12 / (TITLE_HINT.h * 10));
     uint32_t packet, old, q;
     if (g_title_quads[index] == 0u)
         g_title_quads[index] = psx_mod_alloc_gpu_dma_memory(TITLE_QUADS * 40u, 16u);
@@ -1572,13 +1569,8 @@ static void jake_draw_title(uint32_t table, uint32_t index) {
         return;
     jake_title_quad(packet, &TITLE_EDITION, TITLE_TEXT_PALETTE,
                     EDITION_X, EDITION_Y, EDITION_W, EDITION_H);
-    jake_title_quad(packet + 40u, normal ? &TITLE_FACE_NORMAL : &TITLE_FACE_EVIL,
-                    normal ? TITLE_NORMAL_PALETTE : TITLE_EVIL_PALETTE,
-                    FACE_X, FACE_Y, FACE_W, FACE_H);
-    jake_title_quad(packet + 80u, label, TITLE_TEXT_PALETTE,
-                    LABEL_RIGHT - label_w, LABEL_Y, label_w, LABEL_H);
-    jake_title_quad(packet + 120u, &TITLE_HINT, TITLE_TEXT_PALETTE,
-                    HINT_CENTRE - hint_w / 2, HINT_Y, hint_w, HINT_H);
+    jake_title_quad(packet + 40u, label, TITLE_TEXT_PALETTE,
+                    LABEL_CENTRE - label_w / 2, LABEL_Y, label_w, LABEL_H);
     old = psx_mod_read_word(table);                     /* entry 0: drawn last */
     for (q = TITLE_QUADS; q-- > 0u;) {
         const uint32_t at = packet + q * 40u;
