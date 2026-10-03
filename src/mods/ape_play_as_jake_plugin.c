@@ -661,18 +661,21 @@ static void jake_outro_vblank(void) {
 }
 
 /*
- * Spike's "I'm going for it!" as he warps into a level is a CD-XA clip of
- * its own: file 1, channel 1 of the voice interleave at LBA 51083 (16
- * channels, so the channel's sectors are 51084 + 16n; 11 sectors, 1.17 s
- * mono at 18.9 kHz, the last flagged end-of-file). Nothing else streams from
- * the CD then (level music is sequenced), so the CD input is muted from the
- * clip's first delivered sector until a while after its last one.
+ * Spike's line as he warps into a level ("Let's go!", "I'm going for it!",
+ * ...) is a CD-XA clip: file 1 of the voice interleave at LBA 51083 (16
+ * channels, channel c's sectors at 51083 + c + 16n). Channels 0-3 are four
+ * warp-in lines, 1.17-1.71 s mono at 18.9 kHz, and 4-7 the same four again;
+ * the last sector of each is flagged end-of-file. 8-11 are other clips and
+ * are left alone. Nothing else streams from the CD then (level music is
+ * sequenced), so the CD input is muted from the clip's first delivered
+ * sector until a while after its last one.
  */
 enum {
     SPAWN_XA_FILE = 1,
-    SPAWN_XA_CHANNEL = 1,
-    SPAWN_XA_FIRST_LBA = 51084,
-    SPAWN_XA_LAST_LBA = 51244,
+    SPAWN_XA_CHANNELS = 8,              /* 0..7 */
+    SPAWN_XA_FIRST_LBA = 51083,
+    SPAWN_XA_LAST_LBA = 51340,
+    XA_SUBMODE_EOF = 0x80,
     SPAWN_TAIL_FRAMES = 30,             /* the SPU's CD buffer plays out */
     SPAWN_MAX_MUTE_FRAMES = 150
 };
@@ -697,7 +700,7 @@ static void jake_spawn_vblank(void) {
         seq = total - CDROM_SECTOR_HISTORY_CAP;
     for (; entries && seq < total; ++seq) {
         const CDROMSectorHistoryEntry* e = &entries[seq % CDROM_SECTOR_HISTORY_CAP];
-        if (e->seq != seq || e->xa_file != SPAWN_XA_FILE || e->xa_channel != SPAWN_XA_CHANNEL ||
+        if (e->seq != seq || e->xa_file != SPAWN_XA_FILE || e->xa_channel >= SPAWN_XA_CHANNELS ||
             !e->xa_audio_delivered || e->lba < SPAWN_XA_FIRST_LBA || e->lba > SPAWN_XA_LAST_LBA)
             continue;
         if (!g_spawn.muting) {
@@ -707,7 +710,7 @@ static void jake_spawn_vblank(void) {
             g_spawn.volume[0] = psx_mod_read_half(SPU_CD_VOLUME_LEFT);
             g_spawn.volume[1] = psx_mod_read_half(SPU_CD_VOLUME_RIGHT);
         }
-        g_spawn.tail = e->lba == SPAWN_XA_LAST_LBA ? SPAWN_TAIL_FRAMES : 0u;
+        g_spawn.tail = (e->xa_submode & XA_SUBMODE_EOF) ? SPAWN_TAIL_FRAMES : 0u;
     }
     g_spawn.seen = total;
     if (g_spawn.muting && ((g_spawn.tail > 0u && --g_spawn.tail == 0u) ||

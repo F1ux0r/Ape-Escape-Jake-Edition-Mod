@@ -252,3 +252,14 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   (edition + both words), one palette. JAKE EDITION moved to x 201 to leave a gap. art/portrait.py unused.
 - 2026-10-02: small "PRESS L1 / TO SWAP" (Luckiest Guy, cream + navy outline, no extrusion; atlas 176,62
   59x24) drawn 16 px tall above the NORMAL/EVIL word (y 124), same centre x 348.
+
+## 2026-10-02 Jake: all warp-in voice lines muted
+- User heard "Let's go!" landing in the first level after New Game. re/newgamelog.py (New Game from title
+  save, logs XA clips + screenshots; Start skips cutscenes): at the first level, file 1 ch 4 of the same
+  voice interleave (51083). Decoded all 16 channels: 0-3 = four warp-in lines (1.17/1.17/1.71/1.17 s),
+  4-7 identical copies of 0-3, 8-11 different clips (1.71/1.39/1.71/2.45 s, not identified), 12-15 empty.
+  Ch0/4 = "Let's go!" (first level), ch1/5 = "I'm going for it!" (warp-in save).
+- jake_spawn_vblank now mutes any delivered sector of channels 0-7 in LBA 51083..51340 and ends on the
+  sector's end-of-file submode bit (0x80) + 30 frames, instead of one hard-coded channel/LBA.
+  Verified (re/newgamemute.py): ch0 played in the first level, CD volume 0 from the first push, all 51744
+  pushed frames muted, restored 0.5 s after the last sector.
