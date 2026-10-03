@@ -263,3 +263,7 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   sector's end-of-file submode bit (0x80) + 30 frames, instead of one hard-coded channel/LBA.
   Verified (re/newgamemute.py): ch0 played in the first level, CD volume 0 from the first push, all 51744
   pushed frames muted, restored 0.5 s after the last sector.
+- 2026-10-02: user listened to the exported clips (modding/sfx/warpin_clips, not committed): ch8-11 are Spike
+  too -> mute channels 0-11 of the 51083 interleave (LBA up to 51460, ch11 ends 51446), cap 240 frames
+  (ch11 is 2.45 s). No other Jake voice lines to swap in (only his race yell). Where ch8-11 play: unknown.
+  re/voicepitch.py (autocorrelation f0) couldn't separate speakers - all ~220-330 Hz kid voices.

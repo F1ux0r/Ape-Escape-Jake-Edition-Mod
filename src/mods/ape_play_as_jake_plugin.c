@@ -664,20 +664,20 @@ static void jake_outro_vblank(void) {
  * Spike's line as he warps into a level ("Let's go!", "I'm going for it!",
  * ...) is a CD-XA clip: file 1 of the voice interleave at LBA 51083 (16
  * channels, channel c's sectors at 51083 + c + 16n). Channels 0-3 are four
- * warp-in lines, 1.17-1.71 s mono at 18.9 kHz, and 4-7 the same four again;
- * the last sector of each is flagged end-of-file. 8-11 are other clips and
- * are left alone. Nothing else streams from the CD then (level music is
+ * warp-in lines, 1.17-1.71 s mono at 18.9 kHz, 4-7 the same four again and
+ * 8-11 four more Spike lines (1.39-2.45 s; 12-15 are empty); the last sector
+ * of each is flagged end-of-file. All are muted. Nothing else streams from the CD then (level music is
  * sequenced), so the CD input is muted from the clip's first delivered
  * sector until a while after its last one.
  */
 enum {
     SPAWN_XA_FILE = 1,
-    SPAWN_XA_CHANNELS = 8,              /* 0..7 */
+    SPAWN_XA_CHANNELS = 12,             /* 0..11 */
     SPAWN_XA_FIRST_LBA = 51083,
-    SPAWN_XA_LAST_LBA = 51340,
+    SPAWN_XA_LAST_LBA = 51460,          /* channel 11 runs to 51446 */
     XA_SUBMODE_EOF = 0x80,
     SPAWN_TAIL_FRAMES = 30,             /* the SPU's CD buffer plays out */
-    SPAWN_MAX_MUTE_FRAMES = 150
+    SPAWN_MAX_MUTE_FRAMES = 240
 };
 
 static struct {
