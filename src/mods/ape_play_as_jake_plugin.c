@@ -1494,7 +1494,8 @@ enum {
     EDITION_X = 201, EDITION_Y = 138,                   /* screen boxes (384-wide picture) */
     EDITION_W = 108, EDITION_H = 22,
     LABEL_CENTRE = 348, LABEL_Y = 141, LABEL_H = 15,         /* beside JAKE EDITION */
-    TITLE_QUADS = 2
+    HINT_Y = 124, HINT_H = 16,                               /* PRESS L1 / TO SWAP above it */
+    TITLE_QUADS = 3
 };
 static uint32_t g_title_quads[2];
 static uint8_t g_force_upload;
@@ -1554,13 +1555,15 @@ static void jake_title_quad(uint32_t packet, const TitleRect* r, uint32_t palett
     psx_mod_write_word(packet + 36u, (v1 << 8) | u1);
 }
 
-/* "JAKE EDITION" and, beside it, the look in use (NORMAL / EVIL). Linked
+/* "JAKE EDITION" and, beside it, the look in use (NORMAL / EVIL) under a
+ * small "PRESS L1 / TO SWAP". Linked
  * after OT entry 0: on the scene, under the menu. The picture is 384
  * pixels across a 4:3 screen, so art is drawn 1.2x wide. */
 static void jake_draw_title(uint32_t table, uint32_t index) {
     const int normal = g_look == JAKE_NORMAL;
     const TitleRect* label = normal ? &TITLE_NORMAL : &TITLE_EVIL;
     const int32_t label_w = (int32_t)(label->w * LABEL_H * 12 / (label->h * 10));
+    const int32_t hint_w = (int32_t)(TITLE_HINT.w * HINT_H * 12 / (TITLE_HINT.h * 10));
     uint32_t packet, old, q;
     if (g_title_quads[index] == 0u)
         g_title_quads[index] = psx_mod_alloc_gpu_dma_memory(TITLE_QUADS * 40u, 16u);
@@ -1571,6 +1574,8 @@ static void jake_draw_title(uint32_t table, uint32_t index) {
                     EDITION_X, EDITION_Y, EDITION_W, EDITION_H);
     jake_title_quad(packet + 40u, label, TITLE_TEXT_PALETTE,
                     LABEL_CENTRE - label_w / 2, LABEL_Y, label_w, LABEL_H);
+    jake_title_quad(packet + 80u, &TITLE_HINT, TITLE_TEXT_PALETTE,
+                    LABEL_CENTRE - hint_w / 2, HINT_Y, hint_w, HINT_H);
     old = psx_mod_read_word(table);                     /* entry 0: drawn last */
     for (q = TITLE_QUADS; q-- > 0u;) {
         const uint32_t at = packet + q * 40u;

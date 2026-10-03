@@ -250,3 +250,5 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - 2026-10-02 title declutter (user: "looks cluttered"): portraits and the L1 hint removed; only the look's
   word (NORMAL / EVIL, Luckiest Guy) beside JAKE EDITION, centred at x 348, 15 px tall. Atlas now 256x86
   (edition + both words), one palette. JAKE EDITION moved to x 201 to leave a gap. art/portrait.py unused.
+- 2026-10-02: small "PRESS L1 / TO SWAP" (Luckiest Guy, cream + navy outline, no extrusion; atlas 176,62
+  59x24) drawn 16 px tall above the NORMAL/EVIL word (y 124), same centre x 348.
