@@ -972,7 +972,9 @@ static const JakeClutSwap JAKE_CLUT_SWAPS[] = {
      * The rest of the gadgets, same rule (colours of saturation >= 0.25 to
      * hue 265, greys and metal left alone): ring icons by gadget id (2 radar,
      * 3 slingshot, 5 magic punch, 6 sky flyer, 7 RC car) and the gadget
-     * textures (only gadget models draw with these palettes).
+     * textures (only gadget models draw with these palettes). The punch's
+     * spring (944,502) and the car's gold (944,505) keep their colours, and
+     * the punch and car icons and the car body change only their reds.
      */
     /* radar icon */
     { 944u, 459u, 16u,
@@ -986,54 +988,42 @@ static const JakeClutSwap JAKE_CLUT_SWAPS[] = {
         0xC1EEu, 0xD7FFu, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u },
       { 0x0000u, 0xAC05u, 0xD008u, 0xFC0Du, 0x8400u, 0xFFFFu, 0xDD0Eu, 0xE2D6u,
         0xC1EEu, 0xFEB9u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u } },
-    /* magic punch icon */
+    /* magic punch icon: only the red glove (the yellow handle stays) */
     { 944u, 454u, 16u,
       { 0x0000u, 0x800Du, 0x801Fu, 0x819Bu, 0x9018u, 0x82BFu, 0x800Du, 0x8014u,
         0x99BFu, 0xFFFFu, 0x8400u, 0x9115u, 0xA3C0u, 0x8000u, 0x8000u, 0x8000u },
-      { 0x0000u, 0xB405u, 0xFC0Du, 0xEC0Bu, 0xE00Au, 0xFC0Du, 0xB405u, 0xD008u,
-        0xFCD0u, 0xFFFFu, 0x8400u, 0xD48Bu, 0xF80Cu, 0x8000u, 0x8000u, 0x8000u } },
+      { 0x0000u, 0xB405u, 0xFC0Du, 0x819Bu, 0xE00Au, 0x82BFu, 0xB405u, 0xD008u,
+        0xFCD0u, 0xFFFFu, 0x8400u, 0xD48Bu, 0xA3C0u, 0x8000u, 0x8000u, 0x8000u } },
     /* sky flyer icon */
     { 944u, 458u, 16u,
       { 0x0000u, 0xCE73u, 0x8400u, 0xAB80u, 0x96A0u, 0x8300u, 0x9F20u, 0x9D20u,
         0xFFFFu, 0xB18Cu, 0x8000u, 0xA3D2u, 0xBBD9u, 0xBBAFu, 0xDED6u, 0x8000u },
       { 0x0000u, 0xCE73u, 0x8400u, 0xF00Cu, 0xD409u, 0xE00Au, 0xE40Au, 0xA404u,
         0xFFFFu, 0xB18Cu, 0x8000u, 0xF911u, 0xF9D5u, 0xF5D4u, 0xDED6u, 0x8000u } },
-    /* RC car icon */
+    /* RC car icon: only the red */
     { 944u, 457u, 16u,
       { 0x0000u, 0x8C63u, 0x98C6u, 0xB9CEu, 0x8400u, 0x801Fu, 0xFFFFu, 0x810Du,
         0x827Du, 0x83FFu, 0xCA2Cu, 0xF756u, 0x8C10u, 0xAD6Bu, 0x9CE7u, 0xDEF7u },
-      { 0x0000u, 0x8C63u, 0x98C6u, 0xB9CEu, 0x8400u, 0xFC0Du, 0xFFFFu, 0xB405u,
-        0xF40Cu, 0xFC0Du, 0xCA2Cu, 0xF6D9u, 0xC007u, 0xAD6Bu, 0x9CE7u, 0xDEF7u } },
-    /* gadget texture: reds, yellow */
+      { 0x0000u, 0x8C63u, 0x98C6u, 0xB9CEu, 0x8400u, 0xFC0Du, 0xFFFFu, 0x810Du,
+        0x827Du, 0x83FFu, 0xCA2Cu, 0xF756u, 0xC007u, 0xAD6Bu, 0x9CE7u, 0xDEF7u } },
+    /* RC car body texture: only the reds (its yellow and gold stay) */
     { 944u, 509u, 16u,
       { 0xFFFFu, 0x8C63u, 0xD6B7u, 0xAD6Eu, 0xC639u, 0xB9D7u, 0xB9DFu, 0x800Du,
         0x8015u, 0x887Au, 0x88B5u, 0x9D2Du, 0x94C7u, 0x8295u, 0x81C6u, 0x0000u },
       { 0xFFFFu, 0x8C63u, 0xD6B7u, 0xAD6Eu, 0xE634u, 0xDDD2u, 0xFDD5u, 0xB405u,
-        0xD409u, 0xE84Cu, 0xD44Au, 0xB4E9u, 0x94C7u, 0xD409u, 0xB806u, 0x0000u } },
-    /* gadget texture: greys, red light */
+        0xD409u, 0xE84Cu, 0xD44Au, 0xB4E9u, 0x94C7u, 0x8295u, 0x81C6u, 0x0000u } },
+    /* radar texture: greys stay, the red light goes violet */
     { 944u, 491u, 16u,
       { 0xFFFFu, 0x9084u, 0x98C6u, 0xA108u, 0xA529u, 0xAD6Bu, 0xB18Cu, 0xCE73u,
         0x801Fu, 0x880Bu, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u },
       { 0xFFFFu, 0x9084u, 0x98C6u, 0xA108u, 0xA529u, 0xAD6Bu, 0xB18Cu, 0xCE73u,
         0xFC0Du, 0xAC05u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u } },
-    /* gadget texture: gold */
-    { 944u, 505u, 16u,
-      { 0xFFFFu, 0x8C86u, 0x8CE9u, 0x8D2Bu, 0x8DAFu, 0x8DF1u, 0x8E54u, 0x8EB7u,
-        0x8ED8u, 0x8F9Eu, 0x8EF8u, 0x8FFFu, 0xA4C6u, 0xACE7u, 0xA0A5u, 0x0000u },
-      { 0xFFFFu, 0x9864u, 0xA465u, 0xAC66u, 0xBC68u, 0xC469u, 0xD06Au, 0xDC6Bu,
-        0xE06Cu, 0xF86Eu, 0xE06Cu, 0xFC6Fu, 0xA4C6u, 0xACE7u, 0xA0A5u, 0x0000u } },
-    /* gadget texture: greens */
+    /* sky flyer texture: greens */
     { 944u, 504u, 16u,
       { 0xFFFFu, 0xB7DFu, 0xF3FFu, 0xD7FFu, 0x9BDCu, 0x8BD9u, 0x87D6u, 0x83CFu,
         0x83E9u, 0x83E4u, 0x8781u, 0x8040u, 0x8E60u, 0x9180u, 0x8CC0u, 0x8000u },
       { 0xFFFFu, 0xFDB4u, 0xFF9Du, 0xFEB9u, 0xF8D0u, 0xF84Eu, 0xF82Du, 0xF80Cu,
         0xFC0Du, 0xFC0Du, 0xF02Cu, 0x8040u, 0xCC08u, 0xB005u, 0x9802u, 0x8000u } },
-    /* gadget texture: reds, oranges */
-    { 944u, 502u, 16u,
-      { 0xFFFFu, 0x8006u, 0x8008u, 0x802Du, 0x804Fu, 0x8073u, 0x80BBu, 0x80DEu,
-        0x84D6u, 0x80B5u, 0x81B4u, 0x8219u, 0x8239u, 0x867Bu, 0x8A4Du, 0x0000u },
-      { 0xFFFFu, 0x9802u, 0xA003u, 0xB405u, 0xBC06u, 0xCC08u, 0xEC0Bu, 0xF80Cu,
-        0xD82Au, 0xD409u, 0xD008u, 0xE40Au, 0xE40Au, 0xEC2Cu, 0xC849u, 0x0000u } },
 };
 enum { JAKE_CLUT_SWAP_COUNT = sizeof(JAKE_CLUT_SWAPS) / sizeof(JAKE_CLUT_SWAPS[0]) };
 
@@ -1058,9 +1048,12 @@ static float jake_hue_channel(float p, float q, float t) {
     return p;
 }
 
-/* Same lightness, purple hue; greys get enough saturation to read purple,
- * unless keep_greys (then colours below 0.15 saturation stay as they are). */
-static uint32_t jake_purple_colour(uint32_t c, int keep_greys) {
+/* Same lightness, purple hue. JAKE_TINT_ALL: greys get enough saturation to
+ * read purple; JAKE_TINT_COLOURS: colours below 0.15 saturation stay as they
+ * are; JAKE_TINT_REDS: only reds (hue within 30 degrees of red) change. */
+enum { JAKE_TINT_ALL, JAKE_TINT_COLOURS, JAKE_TINT_REDS };
+
+static uint32_t jake_purple_colour(uint32_t c, int mode) {
     const float r = (float)(c & 0xFFu) / 255.0f, g = (float)((c >> 8) & 0xFFu) / 255.0f;
     const float b = (float)((c >> 16) & 0xFFu) / 255.0f;
     const float hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
@@ -1068,8 +1061,16 @@ static uint32_t jake_purple_colour(uint32_t c, int keep_greys) {
     const float l = (hi + lo) * 0.5f;
     float s = hi == lo ? 0.0f : (l > 0.5f ? (hi - lo) / (2.0f - hi - lo) : (hi - lo) / (hi + lo));
     float q, p;
-    if (keep_greys && (s < 0.15f || hi < 0.03f))
+    if (mode != JAKE_TINT_ALL && (s < 0.15f || hi < 0.03f))
         return c;
+    if (mode == JAKE_TINT_REDS) {
+        /* red is the top channel and blue the bottom or near it */
+        const float d = hi - lo;
+        const float hue = r == hi ? 60.0f * (g - b) / d : g == hi ? 60.0f * (2.0f + (b - r) / d)
+                                                                  : 60.0f * (4.0f + (r - g) / d);
+        if (hue > 30.0f && hue < 330.0f)
+            return c;
+    }
     s = s * 1.5f < 0.35f ? 0.35f : s * 1.5f > 1.0f ? 1.0f : s * 1.5f;
     q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
     p = 2.0f * l - q;
@@ -1092,7 +1093,7 @@ static void jake_purple_net(uint32_t object) {
     if (colours != g_net_source) {
         for (i = 0; i < count; ++i)
             psx_mod_write_word(g_net_purple + i * 4u,
-                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), 0));
+                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), JAKE_TINT_ALL));
         g_net_source = colours;
     }
     psx_mod_write_word(object + 4u, g_net_purple);
@@ -1124,18 +1125,21 @@ static void jake_purple_net_entry(void) {
 typedef struct JakeModelTint {
     uint32_t entry;
     uint32_t count, first, second;
+    int mode;
 } JakeModelTint;
+/* Found by flashing each entry in the gadget menu; the entries that don't
+ * show there change only their reds. */
 static const JakeModelTint JAKE_MODEL_TINTS[] = {
-    { 0x800EC060u, 32u, 0x00181010u, 0x00201810u },
-    { 0x800EC080u, 19u, 0x00000018u, 0x00000020u },
-    { 0x800EC090u,  8u, 0x00004040u, 0x00004848u },   /* slingshot */
-    { 0x800EC0B0u,  2u, 0x00004080u, 0x0000F8F8u },
-    { 0x800EC0E0u,  4u, 0x00808080u, 0x000000B0u },
-    { 0x800EC100u, 13u, 0x00000000u, 0x00000040u },
-    { 0x800EC130u,  7u, 0x00000000u, 0x00000030u },
-    { 0x800EC140u,  6u, 0x00000038u, 0x00808080u },
-    { 0x800EC150u, 26u, 0x00000000u, 0x00000018u },
-    { 0x800EC170u,  4u, 0x00000000u, 0x0000F800u },
+    { 0x800EC060u, 32u, 0x00181010u, 0x00201810u, JAKE_TINT_COLOURS },  /* club handle */
+    { 0x800EC080u, 19u, 0x00000018u, 0x00000020u, JAKE_TINT_COLOURS },  /* radar stand */
+    { 0x800EC090u,  8u, 0x00004040u, 0x00004848u, JAKE_TINT_COLOURS },  /* slingshot */
+    { 0x800EC0B0u,  2u, 0x00004080u, 0x0000F8F8u, JAKE_TINT_REDS },
+    { 0x800EC0E0u,  4u, 0x00808080u, 0x000000B0u, JAKE_TINT_REDS },
+    { 0x800EC100u, 13u, 0x00000000u, 0x00000040u, JAKE_TINT_REDS },     /* punch glove */
+    { 0x800EC130u,  7u, 0x00000000u, 0x00000030u, JAKE_TINT_REDS },
+    { 0x800EC140u,  6u, 0x00000038u, 0x00808080u, JAKE_TINT_REDS },
+    { 0x800EC150u, 26u, 0x00000000u, 0x00000018u, JAKE_TINT_COLOURS },  /* radar dish */
+    { 0x800EC170u,  4u, 0x00000000u, 0x0000F800u, JAKE_TINT_REDS },
 };
 enum { JAKE_MODEL_TINT_COUNT = sizeof(JAKE_MODEL_TINTS) / sizeof(JAKE_MODEL_TINTS[0]) };
 static uint32_t g_tint_lists[JAKE_MODEL_TINT_COUNT];
@@ -1156,7 +1160,7 @@ static void jake_tint_gadgets(void) {
             continue;
         for (i = 0; i < tint->count; ++i)
             psx_mod_write_word(g_tint_lists[t] + i * 4u,
-                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), 1));
+                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), tint->mode));
         psx_mod_write_word(tint->entry + 4u, g_tint_lists[t]);
     }
 }
