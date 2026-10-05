@@ -321,3 +321,7 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Models: JAKE_MODEL_TINTS = 10 table entries 0x800EC060..170 by (count, first, second colour) signature ->
   violet copy, greys kept (jake_purple_colour keep_greys). SMG (gadgets mod) in 0x800EC090 fails the signature
   so it stays; after power-down the violet list pointer comes back (verified).
+- 2026-10-05 user tweak: Magic Punch only the red glove (spring = texture 944,502 left stock), RC car only reds
+  (body 944,509 reds only; gold 944,505 left stock), punch/car icons reds only; radar already kept its greys.
+  Model entries mapped by flashing each green in the gadget menu: 060 club handle, 080 radar stand, 090 slingshot,
+  100 punch glove, 150 radar dish; 0B0/0E0/130/140/170 not in the menu -> reds only (JAKE_TINT_REDS).
