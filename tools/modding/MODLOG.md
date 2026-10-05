@@ -300,3 +300,14 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - "Blade longer after spin then shrinks": stock. Blade model scale is constant 1.0 (draw matrix 0x8009ABF4 a0, after
   undoing the 0.74 aspect row); the glow beam is a streak from the tip to a lagging point (a0/a1 at 0x8002020C).
 - Hooks: Jake branch 0x80016A60, 0x80028CC0, 0x8002020C, 0x8001F954; all-mods 13 (gadgets 12 + 0x8001F954).
+
+## 2026-10-05 Jake: Super Hoop + matching icons
+- Hoop: model entry 0x800EC0A0 (32 verts; colours cyan F8F800 + greys) tints a 4-bit stripe texture (tpage 0x3E,
+  palette VRAM 944,503: white/yellow/dark). Cyan tint can't make purple -> tint neutral 0x808080 + palette
+  blue FFE0 / violet FC0B / edge FE60.
+- Gadget ring icons = 0x65 sprites in the main OT, one palette each at x 944: net y448, hoop y451, club y456,
+  flyer y458 (Select menu uses the same). Net mesh (see-through bag) texture palette 944,508. All recoloured to
+  hue 265 (lightness kept; only blues on club/net, greens on hoop). JAKE_CLUT_SWAPS table, uploaded with the face
+  packets only while gpu_vram_peek shows the stock palette.
+- Menu net model = gadget table entry 0x800EC070 (same layout as the hand object) -> same violet copy.
+- Tools: re/hudsprites.py (HUD list sprites), re/ringprims.py (textured prims in a screen box).
