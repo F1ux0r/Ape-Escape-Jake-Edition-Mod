@@ -311,3 +311,13 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   packets only while gpu_vram_peek shows the stock palette.
 - Menu net model = gadget table entry 0x800EC070 (same layout as the hand object) -> same violet copy.
 - Tools: re/hudsprites.py (HUD list sprites), re/ringprims.py (textured prims in a screen box).
+
+## 2026-10-05 Jake: every gadget violet (+ ring icons)
+- Gadget ids -> ring icon palette rows at x 944 (found by writing slot 0x800F51A9 and reading the 0x65 sprite at
+  270,39): 1 net 448, 2 radar 459, 3 sling 455, 4 hoop 451, 5 punch 454, 6 flyer 458, 7 RC car 457, 0/8 club 456
+  (9 -> 452, a brown ball, unknown, left alone).
+- Gadget textures (menu only): palettes 944,509/491/505/504/502 (502/509 reds = car/punch, 504 greens = flyer,
+  505 gold, 491 grey + red light); 469 greys untouched. All in JAKE_CLUT_SWAPS (hue 265, sat >= 0.25 only).
+- Models: JAKE_MODEL_TINTS = 10 table entries 0x800EC060..170 by (count, first, second colour) signature ->
+  violet copy, greys kept (jake_purple_colour keep_greys). SMG (gadgets mod) in 0x800EC090 fails the signature
+  so it stays; after power-down the violet list pointer comes back (verified).
