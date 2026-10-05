@@ -325,3 +325,7 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   (body 944,509 reds only; gold 944,505 left stock), punch/car icons reds only; radar already kept its greys.
   Model entries mapped by flashing each green in the gadget menu: 060 club handle, 080 radar stand, 090 slingshot,
   100 punch glove, 150 radar dish; 0B0/0E0/130/140/170 not in the menu -> reds only (JAKE_TINT_REDS).
+- 2026-10-05 Sky Flyer: flight spin glow = palette 944,470 (all greens) -> violet. Flight sparkles = translucent
+  sprites, palette 704,505 x a teal tint from the particle array (24 x 0x66 at 0x800E07F0, colour u16 +0x30/32/34);
+  user chose to KEEP the green sparkles, so no sparkle change. Orb haze palette 704,498 is greyscale (generic glow).
+  Note: heavy back-to-back gpu_frame_dump calls trigger the slow_frames watchdog dump and stall the debug server.
