@@ -845,10 +845,121 @@ static void jake_spawn_vblank(void) {
 
 static void jake_click_vblank(void);
 
+/* ---- Purple gadgets ----------------------------------------------------- */
+
+/*
+ * Jake's Stun Club and Time Net are purple. Colour words are R, G, B bytes.
+ *
+ * Club: the light blade is model entry 0x800EC0F0, whose colour pointer
+ * (entry +4) leads to blue, teal and a white core. While it still points at
+ * those stock colours it is pointed at a purple set of ours. The Power Up
+ * Gadgets mod swaps the same pointer to red while the club is powered and
+ * puts back whatever was there, so powered stays red and unpowered purple.
+ * The blade's halo is a glow beam, 0x8002020C called from the club draw
+ * (returning to 0x8009AD34) with its colour in a3: stock light blue becomes
+ * purple (a red one from the power-up is left alone).
+ *
+ * Net: drawn by the transform 0x80016A60 called from 0x80099324 with the net
+ * object in a0; its colour list (object +4, count u16 at header +8, 25 greyish
+ * blues) is copied with every colour turned to the purple hue, keeping its
+ * lightness, and the object pointed at the copy (redone after a level load).
+ */
+static const uint32_t JAKE_CLUB_BLADE_ENTRY = 0x800EC0F0u;
+static const uint32_t JAKE_CLUB_STOCK[3] = { 0x00F80000u, 0x00808000u, 0x00F8F8F8u };
+static const uint32_t JAKE_CLUB_PURPLE[3] = {
+    0x00F800A8u,   /* purple (was blue) */
+    0x00800058u,   /* dark purple (was teal) */
+    0x00F8B8E0u    /* lavender core (was white) */
+};
+static const uint32_t JAKE_GLOW_BEAM_FUNCTION = 0x8002020Cu;
+static const uint32_t JAKE_CLUB_HALO_RETURN = 0x8009AD34u;
+static const uint32_t JAKE_CLUB_HALO_STOCK = 0x00FF8080u;
+static const uint32_t JAKE_CLUB_HALO_PURPLE = 0x00FF60C8u;
+static const uint32_t JAKE_NET_TRANSFORM_RETURN = 0x8009932Cu;
+static const float JAKE_PURPLE_HUE = 280.0f / 360.0f;
+enum { JAKE_NET_MAX_COLOURS = 64 };
+
+static uint32_t g_club_purple, g_net_purple, g_net_source;
+
+static int jake_ram_pointer(uint32_t p) {
+    return p >= 0x80000000u && p < 0x80200000u;
+}
+
+static void jake_purple_club(void) {
+    const uint32_t entry = JAKE_CLUB_BLADE_ENTRY + 4u, colours = psx_mod_read_word(entry);
+    int i;
+    if (!jake_ram_pointer(colours) || colours == g_club_purple)
+        return;
+    for (i = 0; i < 3; ++i)
+        if (psx_mod_read_word(colours + (uint32_t)i * 4u) != JAKE_CLUB_STOCK[i])
+            return;   /* not the stock blade (e.g. powered red) */
+    if (g_club_purple == 0u) {
+        g_club_purple = psx_mod_alloc_guest_memory(16u, 16u);
+        if (g_club_purple == 0u)
+            return;
+        for (i = 0; i < 3; ++i)
+            psx_mod_write_word(g_club_purple + (uint32_t)i * 4u, JAKE_CLUB_PURPLE[i]);
+    }
+    psx_mod_write_word(entry, g_club_purple);
+}
+
+static float jake_hue_channel(float p, float q, float t) {
+    if (t < 0.0f) t += 1.0f;
+    if (t > 1.0f) t -= 1.0f;
+    if (t < 1.0f / 6.0f) return p + (q - p) * 6.0f * t;
+    if (t < 0.5f) return q;
+    if (t < 2.0f / 3.0f) return p + (q - p) * (2.0f / 3.0f - t) * 6.0f;
+    return p;
+}
+
+/* Same lightness, purple hue; greys get enough saturation to read purple. */
+static uint32_t jake_purple_colour(uint32_t c) {
+    const float r = (float)(c & 0xFFu) / 255.0f, g = (float)((c >> 8) & 0xFFu) / 255.0f;
+    const float b = (float)((c >> 16) & 0xFFu) / 255.0f;
+    const float hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    const float lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    const float l = (hi + lo) * 0.5f;
+    float s = hi == lo ? 0.0f : (l > 0.5f ? (hi - lo) / (2.0f - hi - lo) : (hi - lo) / (hi + lo));
+    float q, p;
+    s = s * 1.5f < 0.35f ? 0.35f : s * 1.5f > 1.0f ? 1.0f : s * 1.5f;
+    q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
+    p = 2.0f * l - q;
+    return (uint32_t)(jake_hue_channel(p, q, JAKE_PURPLE_HUE + 1.0f / 3.0f) * 255.0f + 0.5f) |
+           (uint32_t)(jake_hue_channel(p, q, JAKE_PURPLE_HUE) * 255.0f + 0.5f) << 8 |
+           (uint32_t)(jake_hue_channel(p, q, JAKE_PURPLE_HUE - 1.0f / 3.0f) * 255.0f + 0.5f) << 16 |
+           (c & 0xFF000000u);
+}
+
+static void jake_purple_net(uint32_t object) {
+    const uint32_t header = psx_mod_read_word(object), colours = psx_mod_read_word(object + 4u);
+    uint32_t count, i;
+    if (!jake_ram_pointer(header) || !jake_ram_pointer(colours) || colours == g_net_purple)
+        return;
+    count = psx_mod_read_half(header + 8u);
+    if (count == 0u || count > JAKE_NET_MAX_COLOURS)
+        return;
+    if (g_net_purple == 0u && (g_net_purple = psx_mod_alloc_guest_memory(JAKE_NET_MAX_COLOURS * 4u, 16u)) == 0u)
+        return;
+    if (colours != g_net_source) {
+        for (i = 0; i < count; ++i)
+            psx_mod_write_word(g_net_purple + i * 4u,
+                               jake_purple_colour(psx_mod_read_word(colours + i * 4u)));
+        g_net_source = colours;
+    }
+    psx_mod_write_word(object + 4u, g_net_purple);
+}
+
+static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
+    (void)address;
+    if (g_enabled && cpu->gpr[31] == JAKE_CLUB_HALO_RETURN && cpu->gpr[7] == JAKE_CLUB_HALO_STOCK)
+        cpu->gpr[7] = JAKE_CLUB_HALO_PURPLE;
+}
+
 static void jake_vblank(void) {
     static uint32_t ticks;
     if (!g_enabled)
         return;
+    jake_purple_club();
     if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
     jake_outro_vblank();
@@ -1444,6 +1555,10 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
 
     if (!g_enabled || jake_is_swapped(object))
         return;
+    if (cpu->gpr[31] == JAKE_NET_TRANSFORM_RETURN) {
+        jake_purple_net(object);
+        return;
+    }
     jake_unstick(object);
     header = psx_mod_read_word(object);
     matrices = psx_mod_read_word(object + 0x14u);
@@ -1865,4 +1980,6 @@ PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
         "ape.characters.play-as-jake", JAKE_TRANSFORM_FUNCTION, jake_transform_entry);
     (void)psx_mod_register_function_entry_plugin(
         "ape.characters.play-as-jake", JAKE_DRAW_OT_FUNCTION, jake_draw_ot_entry);
+    (void)psx_mod_register_function_entry_plugin(
+        "ape.characters.play-as-jake", JAKE_GLOW_BEAM_FUNCTION, jake_glow_beam_entry);
 }
