@@ -49,5 +49,11 @@ User is modding Ape Escape (PSXRecomp v0.3.0 PC recomp, SCUS-94423) with the uni
 **Why:** long multi-session RE project; these took hours to find.
 **How to apply:** start from these instead of re-deriving; next step is Sky Flyer glide tuning (or look tweaks the user asks for), then the next gadget.
 
-**Backup (2026-10-05):** private GitHub repo https://github.com/F1ux0r/ape-escape-mods (remote 'mine', default branch power-up-gadgets; origin = mstan upstream, never push there). Keep PRIVATE until the user says the mod is done. Push to 'mine' after each commit. Notes copied into tools/modding/claude-notes for the user's other computer (re-copy when memory changes). gh at C:\Program Files\GitHub CLI\gh.exe, logged in as F1ux0r.
+**Repos (2026-10-05, split by user request - two separate mods, two PRIVATE GitHub repos; keep private until the user says done):**
+- Gadgets: branch power-up-gadgets -> remote 'gadgets' = github.com/F1ux0r/ape-escape-power-up-gadgets (all 12 hooks in game.toml).
+- Jake: branch play-as-jake -> remote 'jake' = github.com/F1ux0r/ape-escape-play-as-jake (game.toml hooks only 0x80016A60, 0x80028CC0).
+- all-mods: LOCAL-only branch = merge of both (12 hooks), what the user plays. Workflow: commit a change on the mod's own branch, push it, then checkout all-mods and git merge <branch> (game.toml conflicts -> keep the 12-hook list). After switching branches with different hooks run tools\regen.ps1 before cycle.ps1.
+- Old combined repo F1ux0r/ape-escape-mods (remote 'mine') is superseded; user asked whether to delete it.
+- origin = mstan upstream, never push there. gh at C:\Program Files\GitHub CLI\gh.exe (F1ux0r). Notes copied into tools/modding/claude-notes on both branches.
+- Testing tips: R1 = jump (cross is a gadget button); Select in gameplay opens the gadget menu to assign gadgets.
 
