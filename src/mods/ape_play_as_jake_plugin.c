@@ -968,6 +968,72 @@ static const JakeClutSwap JAKE_CLUT_SWAPS[] = {
         0xFE4Bu, 0xF960u, 0xFDA4u, 0xE0C3u, 0xD440u, 0x9000u, 0xB400u, 0x8000u },
       { 0xFFFFu, 0xFF5Cu, 0xFE16u, 0xFD53u, 0xFE16u, 0xFCB0u, 0xFE16u, 0xFCF1u,
         0xFD73u, 0xF80Cu, 0xFC8Fu, 0xE06Cu, 0xD409u, 0x9002u, 0xB405u, 0x8000u } },
+    /*
+     * The rest of the gadgets, same rule (colours of saturation >= 0.25 to
+     * hue 265, greys and metal left alone): ring icons by gadget id (2 radar,
+     * 3 slingshot, 5 magic punch, 6 sky flyer, 7 RC car) and the gadget
+     * textures (only gadget models draw with these palettes).
+     */
+    /* radar icon */
+    { 944u, 459u, 16u,
+      { 0x0000u, 0xA108u, 0xFFFFu, 0xEF5Au, 0xD6B5u, 0xE2F7u, 0xAD6Bu, 0x805Du,
+        0x8011u, 0xCA52u, 0x8400u, 0xB1BFu, 0xBDEFu, 0xC210u, 0x0000u, 0x0000u },
+      { 0x0000u, 0xA108u, 0xFFFFu, 0xEF5Au, 0xD6B5u, 0xE2F7u, 0xAD6Bu, 0xF40Cu,
+        0xC407u, 0xCA52u, 0x8400u, 0xFD94u, 0xBDEFu, 0xC210u, 0x0000u, 0x0000u } },
+    /* slingshot icon */
+    { 944u, 455u, 16u,
+      { 0x0000u, 0x810Bu, 0x8214u, 0x839Fu, 0x8400u, 0xFFFFu, 0xA2F7u, 0xE2D6u,
+        0xC1EEu, 0xD7FFu, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u },
+      { 0x0000u, 0xAC05u, 0xD008u, 0xFC0Du, 0x8400u, 0xFFFFu, 0xDD0Eu, 0xE2D6u,
+        0xC1EEu, 0xFEB9u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u, 0x8000u } },
+    /* magic punch icon */
+    { 944u, 454u, 16u,
+      { 0x0000u, 0x800Du, 0x801Fu, 0x819Bu, 0x9018u, 0x82BFu, 0x800Du, 0x8014u,
+        0x99BFu, 0xFFFFu, 0x8400u, 0x9115u, 0xA3C0u, 0x8000u, 0x8000u, 0x8000u },
+      { 0x0000u, 0xB405u, 0xFC0Du, 0xEC0Bu, 0xE00Au, 0xFC0Du, 0xB405u, 0xD008u,
+        0xFCD0u, 0xFFFFu, 0x8400u, 0xD48Bu, 0xF80Cu, 0x8000u, 0x8000u, 0x8000u } },
+    /* sky flyer icon */
+    { 944u, 458u, 16u,
+      { 0x0000u, 0xCE73u, 0x8400u, 0xAB80u, 0x96A0u, 0x8300u, 0x9F20u, 0x9D20u,
+        0xFFFFu, 0xB18Cu, 0x8000u, 0xA3D2u, 0xBBD9u, 0xBBAFu, 0xDED6u, 0x8000u },
+      { 0x0000u, 0xCE73u, 0x8400u, 0xF00Cu, 0xD409u, 0xE00Au, 0xE40Au, 0xA404u,
+        0xFFFFu, 0xB18Cu, 0x8000u, 0xF911u, 0xF9D5u, 0xF5D4u, 0xDED6u, 0x8000u } },
+    /* RC car icon */
+    { 944u, 457u, 16u,
+      { 0x0000u, 0x8C63u, 0x98C6u, 0xB9CEu, 0x8400u, 0x801Fu, 0xFFFFu, 0x810Du,
+        0x827Du, 0x83FFu, 0xCA2Cu, 0xF756u, 0x8C10u, 0xAD6Bu, 0x9CE7u, 0xDEF7u },
+      { 0x0000u, 0x8C63u, 0x98C6u, 0xB9CEu, 0x8400u, 0xFC0Du, 0xFFFFu, 0xB405u,
+        0xF40Cu, 0xFC0Du, 0xCA2Cu, 0xF6D9u, 0xC007u, 0xAD6Bu, 0x9CE7u, 0xDEF7u } },
+    /* gadget texture: reds, yellow */
+    { 944u, 509u, 16u,
+      { 0xFFFFu, 0x8C63u, 0xD6B7u, 0xAD6Eu, 0xC639u, 0xB9D7u, 0xB9DFu, 0x800Du,
+        0x8015u, 0x887Au, 0x88B5u, 0x9D2Du, 0x94C7u, 0x8295u, 0x81C6u, 0x0000u },
+      { 0xFFFFu, 0x8C63u, 0xD6B7u, 0xAD6Eu, 0xE634u, 0xDDD2u, 0xFDD5u, 0xB405u,
+        0xD409u, 0xE84Cu, 0xD44Au, 0xB4E9u, 0x94C7u, 0xD409u, 0xB806u, 0x0000u } },
+    /* gadget texture: greys, red light */
+    { 944u, 491u, 16u,
+      { 0xFFFFu, 0x9084u, 0x98C6u, 0xA108u, 0xA529u, 0xAD6Bu, 0xB18Cu, 0xCE73u,
+        0x801Fu, 0x880Bu, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u },
+      { 0xFFFFu, 0x9084u, 0x98C6u, 0xA108u, 0xA529u, 0xAD6Bu, 0xB18Cu, 0xCE73u,
+        0xFC0Du, 0xAC05u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u, 0x0000u } },
+    /* gadget texture: gold */
+    { 944u, 505u, 16u,
+      { 0xFFFFu, 0x8C86u, 0x8CE9u, 0x8D2Bu, 0x8DAFu, 0x8DF1u, 0x8E54u, 0x8EB7u,
+        0x8ED8u, 0x8F9Eu, 0x8EF8u, 0x8FFFu, 0xA4C6u, 0xACE7u, 0xA0A5u, 0x0000u },
+      { 0xFFFFu, 0x9864u, 0xA465u, 0xAC66u, 0xBC68u, 0xC469u, 0xD06Au, 0xDC6Bu,
+        0xE06Cu, 0xF86Eu, 0xE06Cu, 0xFC6Fu, 0xA4C6u, 0xACE7u, 0xA0A5u, 0x0000u } },
+    /* gadget texture: greens */
+    { 944u, 504u, 16u,
+      { 0xFFFFu, 0xB7DFu, 0xF3FFu, 0xD7FFu, 0x9BDCu, 0x8BD9u, 0x87D6u, 0x83CFu,
+        0x83E9u, 0x83E4u, 0x8781u, 0x8040u, 0x8E60u, 0x9180u, 0x8CC0u, 0x8000u },
+      { 0xFFFFu, 0xFDB4u, 0xFF9Du, 0xFEB9u, 0xF8D0u, 0xF84Eu, 0xF82Du, 0xF80Cu,
+        0xFC0Du, 0xFC0Du, 0xF02Cu, 0x8040u, 0xCC08u, 0xB005u, 0x9802u, 0x8000u } },
+    /* gadget texture: reds, oranges */
+    { 944u, 502u, 16u,
+      { 0xFFFFu, 0x8006u, 0x8008u, 0x802Du, 0x804Fu, 0x8073u, 0x80BBu, 0x80DEu,
+        0x84D6u, 0x80B5u, 0x81B4u, 0x8219u, 0x8239u, 0x867Bu, 0x8A4Du, 0x0000u },
+      { 0xFFFFu, 0x9802u, 0xA003u, 0xB405u, 0xBC06u, 0xCC08u, 0xEC0Bu, 0xF80Cu,
+        0xD82Au, 0xD409u, 0xD008u, 0xE40Au, 0xE40Au, 0xEC2Cu, 0xC849u, 0x0000u } },
 };
 enum { JAKE_CLUT_SWAP_COUNT = sizeof(JAKE_CLUT_SWAPS) / sizeof(JAKE_CLUT_SWAPS[0]) };
 
@@ -992,8 +1058,9 @@ static float jake_hue_channel(float p, float q, float t) {
     return p;
 }
 
-/* Same lightness, purple hue; greys get enough saturation to read purple. */
-static uint32_t jake_purple_colour(uint32_t c) {
+/* Same lightness, purple hue; greys get enough saturation to read purple,
+ * unless keep_greys (then colours below 0.15 saturation stay as they are). */
+static uint32_t jake_purple_colour(uint32_t c, int keep_greys) {
     const float r = (float)(c & 0xFFu) / 255.0f, g = (float)((c >> 8) & 0xFFu) / 255.0f;
     const float b = (float)((c >> 16) & 0xFFu) / 255.0f;
     const float hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
@@ -1001,6 +1068,8 @@ static uint32_t jake_purple_colour(uint32_t c) {
     const float l = (hi + lo) * 0.5f;
     float s = hi == lo ? 0.0f : (l > 0.5f ? (hi - lo) / (2.0f - hi - lo) : (hi - lo) / (hi + lo));
     float q, p;
+    if (keep_greys && (s < 0.15f || hi < 0.03f))
+        return c;
     s = s * 1.5f < 0.35f ? 0.35f : s * 1.5f > 1.0f ? 1.0f : s * 1.5f;
     q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
     p = 2.0f * l - q;
@@ -1023,7 +1092,7 @@ static void jake_purple_net(uint32_t object) {
     if (colours != g_net_source) {
         for (i = 0; i < count; ++i)
             psx_mod_write_word(g_net_purple + i * 4u,
-                               jake_purple_colour(psx_mod_read_word(colours + i * 4u)));
+                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), 0));
         g_net_source = colours;
     }
     psx_mod_write_word(object + 4u, g_net_purple);
@@ -1042,6 +1111,54 @@ static void jake_purple_net_entry(void) {
         psx_mod_read_word(colours) != 0x00080800u || psx_mod_read_word(colours + 4u) != 0x00201810u)
         return;
     jake_purple_net(JAKE_NET_TABLE_ENTRY);
+}
+
+/*
+ * Every other gadget model in the table (in hand and in the gadget menu):
+ * each entry, recognised by its colour count and first two stock colours,
+ * gets a copy of its colour list with the coloured parts violet (greys and
+ * metal kept) and is pointed at it. Entries holding anything else - another
+ * level's model, or the Power Up Gadgets mod's SMG in the slingshot slot -
+ * are left alone.
+ */
+typedef struct JakeModelTint {
+    uint32_t entry;
+    uint32_t count, first, second;
+} JakeModelTint;
+static const JakeModelTint JAKE_MODEL_TINTS[] = {
+    { 0x800EC060u, 32u, 0x00181010u, 0x00201810u },
+    { 0x800EC080u, 19u, 0x00000018u, 0x00000020u },
+    { 0x800EC090u,  8u, 0x00004040u, 0x00004848u },   /* slingshot */
+    { 0x800EC0B0u,  2u, 0x00004080u, 0x0000F8F8u },
+    { 0x800EC0E0u,  4u, 0x00808080u, 0x000000B0u },
+    { 0x800EC100u, 13u, 0x00000000u, 0x00000040u },
+    { 0x800EC130u,  7u, 0x00000000u, 0x00000030u },
+    { 0x800EC140u,  6u, 0x00000038u, 0x00808080u },
+    { 0x800EC150u, 26u, 0x00000000u, 0x00000018u },
+    { 0x800EC170u,  4u, 0x00000000u, 0x0000F800u },
+};
+enum { JAKE_MODEL_TINT_COUNT = sizeof(JAKE_MODEL_TINTS) / sizeof(JAKE_MODEL_TINTS[0]) };
+static uint32_t g_tint_lists[JAKE_MODEL_TINT_COUNT];
+
+static void jake_tint_gadgets(void) {
+    int t;
+    for (t = 0; t < JAKE_MODEL_TINT_COUNT; ++t) {
+        const JakeModelTint* tint = &JAKE_MODEL_TINTS[t];
+        const uint32_t header = psx_mod_read_word(tint->entry);
+        const uint32_t colours = psx_mod_read_word(tint->entry + 4u);
+        uint32_t i;
+        if (!jake_ram_pointer(header) || !jake_ram_pointer(colours) || colours == g_tint_lists[t] ||
+            psx_mod_read_half(header + 8u) != tint->count ||
+            psx_mod_read_word(colours) != tint->first || psx_mod_read_word(colours + 4u) != tint->second)
+            continue;
+        if (g_tint_lists[t] == 0u &&
+            (g_tint_lists[t] = psx_mod_alloc_guest_memory(tint->count * 4u, 16u)) == 0u)
+            continue;
+        for (i = 0; i < tint->count; ++i)
+            psx_mod_write_word(g_tint_lists[t] + i * 4u,
+                               jake_purple_colour(psx_mod_read_word(colours + i * 4u), 1));
+        psx_mod_write_word(tint->entry + 4u, g_tint_lists[t]);
+    }
 }
 
 /*
@@ -1101,6 +1218,7 @@ static void jake_vblank(void) {
     jake_purple_club();
     jake_purple_hoop();
     jake_purple_net_entry();
+    jake_tint_gadgets();
     if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
     jake_outro_vblank();
