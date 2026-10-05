@@ -866,15 +866,16 @@ static void jake_click_vblank(void);
  */
 static const uint32_t JAKE_CLUB_BLADE_ENTRY = 0x800EC0F0u;
 static const uint32_t JAKE_CLUB_STOCK[3] = { 0x00F80000u, 0x00808000u, 0x00F8F8F8u };
+/* Violet rather than magenta: a first set with more red read as pink. */
 static const uint32_t JAKE_CLUB_PURPLE[3] = {
-    0x00F800A8u,   /* purple (was blue) */
-    0x00800058u,   /* dark purple (was teal) */
-    0x00F8B8E0u    /* lavender core (was white) */
+    0x00F80080u,   /* violet (was blue) */
+    0x00880040u,   /* dark violet (was teal) */
+    0x00F8B8C8u    /* pale violet core (was white) */
 };
 static const uint32_t JAKE_GLOW_BEAM_FUNCTION = 0x8002020Cu;
 static const uint32_t JAKE_CLUB_HALO_RETURN = 0x8009AD34u;
 static const uint32_t JAKE_CLUB_HALO_STOCK = 0x00FF8080u;
-static const uint32_t JAKE_CLUB_HALO_PURPLE = 0x00FF60C8u;
+static const uint32_t JAKE_CLUB_HALO_PURPLE = 0x00FF6088u;
 static const uint32_t JAKE_NET_TRANSFORM_RETURN = 0x8009932Cu;
 static const float JAKE_PURPLE_HUE = 280.0f / 360.0f;
 enum { JAKE_NET_MAX_COLOURS = 64 };
