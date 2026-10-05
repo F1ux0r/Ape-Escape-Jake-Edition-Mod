@@ -267,3 +267,21 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   too -> mute channels 0-11 of the 51083 interleave (LBA up to 51460, ch11 ends 51446), cap 240 frames
   (ch11 is 2.45 s). No other Jake voice lines to swap in (only his race yell). Where ch8-11 play: unknown.
   re/voicepitch.py (autocorrelation f0) couldn't separate speakers - all ~220-330 Hz kid voices.
+
+## 2026-10-05 Jake: hurt cry = Jake's real "ouch" from the disc
+- AI voice-design takes (fal Qwen3 voice design + Maya, ~2 cents, modding/sfx/jake_ai/ow_round1) didn't sound
+  like Jake (user). User found Jake saying "ow, ouch" in the cutscene after the Jake Attack 3 race.
+- Cutscene dialogue lives in the streamed region LBA 53859-183488: data sectors interleaved with XA audio, file 1
+  ch 1, stereo 37.8 kHz (coding 0x01), every 4th sector, no EOF bits (re/xaindex.py indexes all XA streams;
+  ffmpeg -f psxstr on the carved region decodes its audio, 1686 s). Located the user's YouTube clips by
+  spectral-flux cross-correlation + loudness-envelope check: conversation scene at stream time 1236.70 s,
+  post-race "ow, ouch" at 1165.31 s (clip t 5.3). Jake's speaking pitch ~210 Hz median (Spike ~266), brighter.
+- "ouch" = stream sector index 21873 = LBA 143876, sample 0, 18522 samples @37.8k (user picked cut 02B).
+- Plugin: g_yells entries now have a source (JAKE_YELL / JAKE_SILENT / JAKE_OUCH); jake_load_ouch decodes the XA
+  sectors from the disc (4 warm-up sectors, stride 4 LBAs, checks file/chan/coding), mono mix, fades;
+  jake_build_ouch box-filters it to the hurt slot rate (key-on pitch 0x4B8 confirmed via spu_events) at
+  natural speed - a first version squeezed all 0.49 s in (10% faster) and the user said too high pitched;
+  now the last ~40 ms of the "ch" is cut with a 30 ms fade (slot 0xD00 = 0.448 s). SPIKE_YELL_MAX_SIZE 0xD00.
+- Verified: SPU 0x3A420 holds 0xD00 bytes, matches the approved clip at the same speed (corr 0.965); user
+  confirmed in game. Extracted cutscene lines (game audio, not committed): modding/sfx/jake_cutscene,
+  jake_ow_real.

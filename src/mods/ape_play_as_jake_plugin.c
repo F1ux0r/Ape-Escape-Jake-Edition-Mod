@@ -395,9 +395,15 @@ static void jake_load_disc(void) {
  * Jake's written over it through the SPU's manual transfer port; anything
  * else there is left alone.
  *
+ * Spike's hurt cry (0x3A420) becomes Jake's "ouch" from the cutscene after
+ * the Jake Attack 3 race: the second word of his "ow, ouch" as he gets up,
+ * streamed as XA audio (file 1, channel 1, stereo 37.8 kHz, every 4th sector)
+ * from LBA 143876, 18522 samples. It is decoded from the disc, mixed to mono
+ * and resampled to the slot's rate (its very end is cut to fit).
+ *
  * Spike's other lines Jake doesn't say are silenced the same way (a silent
  * block that ends the voice at once): the club spin's "hyaa" (0x38560, which
- * also plays on a catch), "Gotcha!" (0x36B30) and the hurt cry (0x3A420).
+ * also plays on a catch) and "Gotcha!" (0x36B30).
  * These all sit in one bank, disc offset = SPU address + 0x120FF0.
  */
 uint32_t spu_ram_peek(uint32_t addr, uint8_t* out, uint32_t len);
@@ -407,25 +413,38 @@ enum {
     JAKE_VOICE_SIZE = 0xDE0,
     JAKE_VOICE_PITCH = 0x5D2,
     SPIKE_YELL_PITCH = 0x4B8,
-    SPIKE_YELL_MAX_SIZE = 0xC30,
+    SPIKE_YELL_MAX_SIZE = 0xD00,    /* largest slot we write (the hurt cry) */
     JAKE_VOICE_FADE = 320,          /* samples, ~25 ms */
     JAKE_VOICE_CHECK_PERIOD = 30
 };
 static const uint32_t SPU_TRANSFER_ADDRESS = 0x1F801DA6u;
 static const uint32_t SPU_TRANSFER_FIFO = 0x1F801DA8u;
 
+static const uint32_t JAKE_OUCH_LBA = 143876u;
+enum {
+    JAKE_OUCH_SAMPLES = 18522,      /* at 37.8 kHz */
+    JAKE_OUCH_WARMUP = 4,           /* channel sectors decoded first, to settle the filter */
+    JAKE_OUCH_SECTORS = 10,
+    JAKE_OUCH_STRIDE = 4,           /* LBAs between the channel's sectors */
+    JAKE_OUCH_FADE_IN = 454,        /* 12 ms */
+    JAKE_OUCH_FADE_OUT = 1134,      /* 30 ms */
+    XA_SECTOR_SAMPLES = 2016        /* per stereo channel */
+};
+
+enum { JAKE_YELL, JAKE_SILENT, JAKE_OUCH };
+
 static struct {
     uint32_t spu, size, disc;
-    uint8_t silent;                 /* 1: silence it rather than Jake's yell */
+    uint8_t source;                 /* JAKE_YELL / JAKE_SILENT / JAKE_OUCH */
     uint8_t head[64];               /* Spike's first blocks, to recognise it */
     uint8_t jake[SPIKE_YELL_MAX_SIZE];
     uint32_t jake_size;
 } g_yells[] = {
-    { 0x38F00u, 0xC30u, 0x00159EF0u, 0u },   /* double jump */
-    { 0x39B40u, 0x8D0u, 0x0015AB30u, 0u },   /* Stun Club swing */
-    { 0x38560u, 0x990u, 0x00159550u, 1u },   /* Stun Club spin, catch */
-    { 0x36B30u, 0x1A20u, 0x00157B20u, 1u },  /* "Gotcha!" */
-    { 0x3A420u, 0xD00u, 0x0015B410u, 1u },   /* hurt */
+    { 0x38F00u, 0xC30u, 0x00159EF0u, JAKE_YELL },    /* double jump */
+    { 0x39B40u, 0x8D0u, 0x0015AB30u, JAKE_YELL },    /* Stun Club swing */
+    { 0x38560u, 0x990u, 0x00159550u, JAKE_SILENT },  /* Stun Club spin, catch */
+    { 0x36B30u, 0x1A20u, 0x00157B20u, JAKE_SILENT }, /* "Gotcha!" */
+    { 0x3A420u, 0xD00u, 0x0015B410u, JAKE_OUCH },    /* hurt */
 };
 enum { JAKE_YELL_COUNT = sizeof(g_yells) / sizeof(g_yells[0]) };
 
@@ -500,14 +519,59 @@ static void jake_adpcm_block(const int16_t* x, int* s1, int* s2, uint8_t flags, 
     }
 }
 
-static void jake_build_voice(const uint8_t* disc) {
+/* Fills a slot: its silent lead-in block, then `blocks` blocks of pcm. */
+static void jake_encode_slot(int y, const int16_t* pcm, uint32_t blocks) {
+    uint32_t b;
+    int s1 = 0, s2 = 0;
+    memset(g_yells[y].jake, 0, 16);   /* the silent lead-in block, as stock */
+    for (b = 0; b < blocks; ++b)
+        jake_adpcm_block(pcm + b * 28u, &s1, &s2,
+                         (uint8_t)(b == 0 ? 0x04u : b + 1u == blocks ? 0x01u : 0x00u),
+                         g_yells[y].jake + 16u * (b + 1u));
+    g_yells[y].jake_size = 16u * (blocks + 1u);
+}
+
+/*
+ * The "ouch" (37.8 kHz mono, faded in) resampled to the hurt cry's playback
+ * rate (pitch 0x4B8, ~13 kHz) so it plays at its natural speed and pitch -
+ * squeezing all of it in (10% faster) sounded too high. The slot holds
+ * 0.45 s of the 0.49 s, so the last ~40 ms of the "ch" are cut with a fade.
+ * Each output sample is the mean of the source samples it covers, which also
+ * keeps the downsampling from aliasing. Peak-normalised to Spike's level.
+ */
+enum { JAKE_OUCH_CUT_FADE = 390 };  /* 30 ms at the slot rate */
+
+static void jake_build_ouch(int y, const int16_t* ouch) {
+    static int16_t out[SPIKE_YELL_MAX_SIZE / 16 * 28];
+    const uint32_t blocks = g_yells[y].size / 16u - 1u, n = blocks * 28u;
+    const double step = 37800.0 * 4096.0 / (44100.0 * SPIKE_YELL_PITCH);
+    static double sums[SPIKE_YELL_MAX_SIZE / 16 * 28];
+    double peak = 1.0;
+    uint32_t i;
+    for (i = 0; i < n; ++i) {
+        uint32_t k = (uint32_t)(i * step), e = (uint32_t)((i + 1u) * step), c = 0;
+        double sum = 0.0;
+        for (; k < e && k < JAKE_OUCH_SAMPLES; ++k, ++c)
+            sum += ouch[k];
+        sums[i] = c ? sum / c : 0.0;
+        if (sums[i] > peak) peak = sums[i];
+        if (-sums[i] > peak) peak = -sums[i];
+    }
+    for (i = 0; i < n; ++i) {
+        const double fade = n - i < JAKE_OUCH_CUT_FADE ? (double)(n - i) / JAKE_OUCH_CUT_FADE : 1.0;
+        out[i] = jake_clamp16((int)(sums[i] * 32000.0 / peak * fade));
+    }
+    jake_encode_slot(y, out, blocks);
+}
+
+static void jake_build_voice(const uint8_t* disc, const int16_t* ouch) {
     static int16_t pcm[JAKE_VOICE_SIZE / 16 * 28], resampled[JAKE_VOICE_SIZE / 16 * 28];
     static int16_t cut[JAKE_VOICE_SIZE / 16 * 28];
     /* Skip the source's silent lead-in block; each slot gets its own. */
     const uint32_t n = jake_adpcm_decode(disc + 16, JAKE_VOICE_SIZE - 16u, pcm, sizeof(pcm) / sizeof(pcm[0]));
     const uint32_t m = (uint32_t)((uint64_t)n * SPIKE_YELL_PITCH / JAKE_VOICE_PITCH);
     const uint32_t full_blocks = (m + 27u) / 28u;
-    uint32_t i, b;
+    uint32_t i;
     int y;
     for (i = 0; i < full_blocks * 28u; ++i) {
         const float at = (float)i * JAKE_VOICE_PITCH / SPIKE_YELL_PITCH;
@@ -518,7 +582,11 @@ static void jake_build_voice(const uint8_t* disc) {
     }
     for (y = 0; y < JAKE_YELL_COUNT; ++y) {
         const uint32_t room = g_yells[y].size / 16u - 1u;   /* after the lead-in */
-        if (g_yells[y].silent) {
+        if (g_yells[y].source == JAKE_OUCH && ouch) {
+            jake_build_ouch(y, ouch);
+            continue;
+        }
+        if (g_yells[y].source != JAKE_YELL) {
             /* lead-in, then one silent block flagged start + end */
             memset(g_yells[y].jake, 0, 32);
             g_yells[y].jake[17] = 0x05u;
@@ -526,7 +594,6 @@ static void jake_build_voice(const uint8_t* disc) {
             continue;
         }
         const uint32_t blocks = full_blocks < room ? full_blocks : room;
-        int s1 = 0, s2 = 0;
         memcpy(cut, resampled, blocks * 28u * sizeof(cut[0]));
         if (blocks < full_blocks) {
             const uint32_t end = blocks * 28u;
@@ -534,13 +601,56 @@ static void jake_build_voice(const uint8_t* disc) {
                 cut[end - 1u - i] = (int16_t)((int32_t)cut[end - 1u - i] * (int32_t)i /
                                               JAKE_VOICE_FADE);
         }
-        memset(g_yells[y].jake, 0, 16);   /* the silent lead-in block, as stock */
-        for (b = 0; b < blocks; ++b)
-            jake_adpcm_block(cut + b * 28u, &s1, &s2,
-                             (uint8_t)(b == 0 ? 0x04u : b + 1u == blocks ? 0x01u : 0x00u),
-                             g_yells[y].jake + 16u * (b + 1u));
-        g_yells[y].jake_size = 16u * (blocks + 1u);
+        jake_encode_slot(y, cut, blocks);
     }
+}
+
+/*
+ * XA ADPCM (4-bit stereo) for the "ouch": 18 sound groups of 128 bytes per
+ * sector, 8 units each (even units left, odd right), filter state carried
+ * across sectors. Only sectors of file 1 channel 1 are decoded.
+ */
+static const int XA_FILTERS[4][2] = { { 0, 0 }, { 60, 0 }, { 115, -52 }, { 98, -55 } };
+
+static int jake_load_ouch(FILE* f, int16_t* ouch) {
+    int st[2][2] = { { 0, 0 }, { 0, 0 } };
+    uint8_t raw[2352];
+    uint32_t got = 0;
+    int s;
+    for (s = -JAKE_OUCH_WARMUP; s < JAKE_OUCH_SECTORS; ++s) {
+        const uint32_t lba = JAKE_OUCH_LBA + (uint32_t)(s * JAKE_OUCH_STRIDE);
+        int g, u, j;
+        if (fseek(f, (long)lba * 2352L, SEEK_SET) != 0 || fread(raw, 1, sizeof(raw), f) != sizeof(raw) ||
+            raw[16] != 1u || raw[17] != 1u || !(raw[18] & 0x04u) || raw[19] != 0x01u)
+            return 0;
+        for (g = 0; g < 18; ++g) {
+            const uint8_t* grp = raw + 24 + g * 128;
+            static int16_t lr[2][28 * 4];
+            for (u = 0; u < 8; ++u) {
+                const int ch = u & 1, hdr = grp[4 + u], shift = hdr & 15, flt = (hdr >> 4) & 3;
+                for (j = 0; j < 28; ++j) {
+                    int nib = (grp[16 + j * 4 + u / 2] >> ((u & 1) * 4)) & 15, v;
+                    if (nib >= 8)
+                        nib -= 16;
+                    v = ((nib << 12) >> shift) +
+                        ((st[ch][0] * XA_FILTERS[flt][0] + st[ch][1] * XA_FILTERS[flt][1] + 32) >> 6);
+                    v = jake_clamp16(v);
+                    st[ch][1] = st[ch][0];
+                    st[ch][0] = v;
+                    lr[ch][(u / 2) * 28 + j] = (int16_t)v;
+                }
+            }
+            if (s < 0)
+                continue;
+            for (j = 0; j < 28 * 4 && got < JAKE_OUCH_SAMPLES; ++j)
+                ouch[got++] = (int16_t)(((int)lr[0][j] + lr[1][j]) / 2);
+        }
+    }
+    for (s = 0; s < JAKE_OUCH_FADE_IN; ++s)
+        ouch[s] = (int16_t)(ouch[s] * s / JAKE_OUCH_FADE_IN);
+    for (s = 0; s < JAKE_OUCH_FADE_OUT; ++s)
+        ouch[JAKE_OUCH_SAMPLES - 1 - s] = (int16_t)(ouch[JAKE_OUCH_SAMPLES - 1 - s] * s / JAKE_OUCH_FADE_OUT);
+    return got == JAKE_OUCH_SAMPLES;
 }
 
 /*
@@ -1722,18 +1832,22 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
 
 static void jake_load_voice(void) {
     static uint8_t disc[JAKE_VOICE_SIZE];
+    static int16_t ouch[JAKE_OUCH_SAMPLES];
     char path[1024];
     FILE* f;
     if (!jake_disc_path(path, sizeof(path)) || !(f = fopen(path, "rb")))
         return;
     int y, ok = jake_read_disc(f, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) && disc[17] == 0x04u;
+    const int have_ouch = jake_load_ouch(f, ouch);
     for (y = 0; ok && y < JAKE_YELL_COUNT; ++y)
         ok = jake_read_disc(f, g_yells[y].disc, g_yells[y].head, sizeof(g_yells[y].head)) &&
              g_yells[y].head[17] == 0x04u;
     if (ok)
-        jake_build_voice(disc);
+        jake_build_voice(disc, have_ouch ? ouch : NULL);
     else
         fprintf(stderr, "play-as-jake: Jake's voice was not found on this disc\n");
+    if (ok && !have_ouch)
+        fprintf(stderr, "play-as-jake: Jake's 'ouch' was not found on this disc; hurt cry silenced\n");
     fclose(f);
 }
 

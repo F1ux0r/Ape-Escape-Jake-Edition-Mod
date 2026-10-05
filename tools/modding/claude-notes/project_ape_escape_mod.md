@@ -37,7 +37,7 @@ User is modding Ape Escape (PSXRecomp v0.3.0 PC recomp, SCUS-94423) with the uni
 
 **Runtime gotcha:** only one entry hook per (plugin id, address) — a second registration silently fails (cost a debugging round on the HUD glow). Club powered = red blade (model 0x800EC0F0 colours) + red halo (beam fn 0x8002020C hook).
 
-**Paused 2026-10-02 (user took a break), all committed (HEAD 36cb658), saves backed up.** Pending: Jake hurt sound - user asked for him to say 'ow'; fal balance exhausted (HTTP 403), so made 'ow' variants from his race yell (pitch glide + low-pass sweep) in modding/sfx/jake_hurt (jake_ow_A_classic/B_short/C_yelp, not committed); waiting for user to pick one (then install into Spike's silenced hurt slot SPU 0x3A420) or top up fal for AI TTS (style-matched, not a clone of the voice actor). Other open: debug-code cleanup in gadgets plugin, next gadget.
+**Paused 2026-10-02 (user took a break), all committed (HEAD 36cb658), saves backed up.** 2026-10-05: hurt cry DONE = Jake's real 'ouch' read from the disc cutscene XA stream (LBA 143876, file1 ch1 stereo 37.8k, every 4th sector; natural speed, tail trimmed). Cutscene dialogue region LBA 53859-183488 (re/xaindex.py; ffmpeg -f psxstr decodes it); find lines by matching user's YouTube clips (flux xcorr + envelope check). AI voice-design takes didn't sound like Jake - user prefers real disc audio; next: more Jake lines for other slots (user reviewing modding/sfx/jake_cutscene). Other open: debug-code cleanup in gadgets plugin, next gadget.
 
 **Key addresses**
 - Held gadget 0x800EC2D2, slots 0x800F51A8, Spike actor/render obj 0x800EC1E0 (pos s16 +0x1C, state +0x5E, velocity 20.12 at +0x120/124/128, airborne when s16 +0xEC < 0), set_state 0x80064208, move step 0x80063628, frame-buffer index 0x800EC35C (overlay draws from slot idx^1), camera 0x800E78C0, hand-gadget view matrix 0x800E9E40.
@@ -48,3 +48,6 @@ User is modding Ape Escape (PSXRecomp v0.3.0 PC recomp, SCUS-94423) with the uni
 
 **Why:** long multi-session RE project; these took hours to find.
 **How to apply:** start from these instead of re-deriving; next step is Sky Flyer glide tuning (or look tweaks the user asks for), then the next gadget.
+
+**Backup (2026-10-05):** private GitHub repo https://github.com/F1ux0r/ape-escape-mods (remote 'mine', default branch power-up-gadgets; origin = mstan upstream, never push there). Keep PRIVATE until the user says the mod is done. Push to 'mine' after each commit. Notes copied into tools/modding/claude-notes for the user's other computer (re-copy when memory changes). gh at C:\Program Files\GitHub CLI\gh.exe, logged in as F1ux0r.
+
