@@ -918,30 +918,67 @@ static void jake_purple_club(void) {
  * dark edge, tinted by the model's cyan: white -> light blue, yellow ->
  * green. Cyan has no red, so no tint can give purple: the tint goes neutral
  * and the palette itself becomes blue (as the white stripes looked), violet
- * (the club's) and the dark edge as it looked. The palette is uploaded with
- * the face (jake_upload_face) whenever VRAM still holds the stock one.
+ * (the club's) and the dark edge as it looked.
+ *
+ * The gadget ring's icons (sprites, one palette each at x 944) match: the
+ * club's and net's blues and the hoop's greens and yellow-green turn to the
+ * same violet, lightness kept (the hoop icon ends up blue and violet like
+ * the hoop). Values from re/ icon palette dumps, recoloured at hue 265.
+ *
+ * Each palette below is uploaded with the face (jake_upload_face) whenever
+ * VRAM still holds exactly the stock one, so a level that keeps something
+ * else there is never written over.
  */
 static const uint32_t JAKE_HOOP_ENTRY = 0x800EC0A0u;
 static const uint32_t JAKE_HOOP_STOCK[3] = { 0x00F8F800u, 0x00686868u, 0x00707070u };
 static const uint32_t JAKE_HOOP_NEUTRAL[3] = { 0x00808080u, 0x00686868u, 0x00707070u };
-enum { JAKE_HOOP_CLUT_X = 944, JAKE_HOOP_CLUT_Y = 503, JAKE_HOOP_CLUT_COLOURS = 3 };
-static const uint16_t JAKE_HOOP_CLUT_STOCK[JAKE_HOOP_CLUT_COLOURS] = { 0xFFFFu, 0x83FFu, 0xC950u };
-static const uint16_t JAKE_HOOP_CLUT[JAKE_HOOP_CLUT_COLOURS] = {
-    0xFFE0u,   /* blue (0, 31, 31), was white */
-    0xFC0Bu,   /* violet (11, 0, 31), was yellow */
-    0xFE60u    /* dark edge (0, 19, 31) as it looked tinted */
-};
 static uint32_t g_hoop_neutral;
 uint16_t gpu_vram_peek(int x, int y);
+
+typedef struct JakeClutSwap {
+    uint16_t x, y, count;          /* count even: copies are whole words */
+    uint16_t stock[16], ours[16];
+} JakeClutSwap;
+static const JakeClutSwap JAKE_CLUT_SWAPS[] = {
+    /* hoop stripes: blue (0,31,31) was white, violet (11,0,31) was yellow,
+     * the dark edge (0,19,31) as it looked tinted, 4th unused */
+    { 944u, 503u, 4u, { 0xFFFFu, 0x83FFu, 0xC950u, 0x0000u },
+                      { 0xFFE0u, 0xFC0Bu, 0xFE60u, 0x0000u } },
+    /* club icon */
+    { 944u, 456u, 16u,
+      { 0x0000u, 0xA929u, 0xFECFu, 0xFDA9u, 0xFC48u, 0xD400u, 0xDCEBu, 0xDE73u,
+        0xF79Cu, 0x8400u, 0xBDEFu, 0xFE12u, 0xFF94u, 0x8000u, 0xFFF9u, 0xFFFFu },
+      { 0x0000u, 0xA929u, 0xFDF6u, 0xFD32u, 0xFC4Eu, 0xD409u, 0xDCEEu, 0xDE73u,
+        0xF79Cu, 0x8400u, 0xBDEFu, 0xFE16u, 0xFE99u, 0x8000u, 0xFF3Bu, 0xFFFFu } },
+    /* hoop icon */
+    { 944u, 451u, 16u,
+      { 0x0000u, 0xFE60u, 0xA3E0u, 0xE109u, 0xA286u, 0x8400u, 0xA160u, 0x83F7u,
+        0x8000u, 0xFEF0u, 0xFF72u, 0x8000u, 0x8000u, 0x8000u, 0xFFFFu, 0x8000u },
+      { 0x0000u, 0xFE60u, 0xFC0Du, 0xE109u, 0xD0CCu, 0x8400u, 0xAC05u, 0xFC0Du,
+        0x8000u, 0xFEF0u, 0xFF72u, 0x8000u, 0x8000u, 0x8000u, 0xFFFFu, 0x8000u } },
+    /* net icon */
+    { 944u, 448u, 16u,
+      { 0x0000u, 0xB98Eu, 0xFFFFu, 0xFF72u, 0xFF2Bu, 0xFFFBu, 0xFAA1u, 0xD675u,
+        0xA108u, 0x8400u, 0xC5F1u, 0xEAF9u, 0x8000u, 0xE22Au, 0xE28Cu, 0x8000u },
+      { 0x0000u, 0xB98Eu, 0xFFFFu, 0xFE57u, 0xFD73u, 0xFF7Du, 0xF82Du, 0xD675u,
+        0xA108u, 0x8400u, 0xC5F1u, 0xEAF9u, 0x8000u, 0xE150u, 0xE191u, 0x8000u } },
+    /* net mesh texture (the see-through bag, cyan to blue) */
+    { 944u, 508u, 16u,
+      { 0xFFFFu, 0xFFFAu, 0xFFF0u, 0xFFEAu, 0xFFB0u, 0xFEA5u, 0xFF10u, 0xFE07u,
+        0xFE4Bu, 0xF960u, 0xFDA4u, 0xE0C3u, 0xD440u, 0x9000u, 0xB400u, 0x8000u },
+      { 0xFFFFu, 0xFF5Cu, 0xFE16u, 0xFD53u, 0xFE16u, 0xFCB0u, 0xFE16u, 0xFCF1u,
+        0xFD73u, 0xF80Cu, 0xFC8Fu, 0xE06Cu, 0xD409u, 0x9002u, 0xB405u, 0x8000u } },
+};
+enum { JAKE_CLUT_SWAP_COUNT = sizeof(JAKE_CLUT_SWAPS) / sizeof(JAKE_CLUT_SWAPS[0]) };
 
 static void jake_purple_hoop(void) {
     jake_swap_colours(JAKE_HOOP_ENTRY, JAKE_HOOP_STOCK, JAKE_HOOP_NEUTRAL, 3, &g_hoop_neutral);
 }
 
-static int jake_hoop_clut_is_stock(void) {
+static int jake_clut_is_stock(const JakeClutSwap* swap) {
     int i;
-    for (i = 0; i < JAKE_HOOP_CLUT_COLOURS; ++i)
-        if (gpu_vram_peek(JAKE_HOOP_CLUT_X + i, JAKE_HOOP_CLUT_Y) != JAKE_HOOP_CLUT_STOCK[i])
+    for (i = 0; i < swap->count; ++i)
+        if (gpu_vram_peek(swap->x + i, swap->y) != swap->stock[i])
             return 0;
     return 1;
 }
@@ -990,6 +1027,21 @@ static void jake_purple_net(uint32_t object) {
         g_net_source = colours;
     }
     psx_mod_write_word(object + 4u, g_net_purple);
+}
+
+/* The gadget menu (Select) draws the net from its model-table entry, which
+ * has the same layout (header, colours, ...): recoloured the same way while
+ * it still holds the stock net colours (25, starting (0,8,8), (16,24,32)). */
+static const uint32_t JAKE_NET_TABLE_ENTRY = 0x800EC070u;
+
+static void jake_purple_net_entry(void) {
+    const uint32_t header = psx_mod_read_word(JAKE_NET_TABLE_ENTRY);
+    const uint32_t colours = psx_mod_read_word(JAKE_NET_TABLE_ENTRY + 4u);
+    if (!jake_ram_pointer(header) || !jake_ram_pointer(colours) ||
+        psx_mod_read_half(header + 8u) != 25u ||
+        psx_mod_read_word(colours) != 0x00080800u || psx_mod_read_word(colours + 4u) != 0x00201810u)
+        return;
+    jake_purple_net(JAKE_NET_TABLE_ENTRY);
 }
 
 /*
@@ -1048,6 +1100,7 @@ static void jake_vblank(void) {
         return;
     jake_purple_club();
     jake_purple_hoop();
+    jake_purple_net_entry();
     if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
     jake_outro_vblank();
@@ -1208,14 +1261,16 @@ static void jake_upload_face(uint32_t table) {
      * cache flush first (drawn after the copies), then the copies. */
     words[0] = 0x01000000u;
     jake_link_packet(far_entry, words, 1u);
-    if (jake_hoop_clut_is_stock()) {
+    for (row = 0; row < JAKE_CLUT_SWAP_COUNT; ++row) {
+        const JakeClutSwap* swap = &JAKE_CLUT_SWAPS[row];
+        if (!jake_clut_is_stock(swap))
+            continue;
         words[0] = 0xA0000000u;
-        words[1] = ((uint32_t)JAKE_HOOP_CLUT_Y << 16) | JAKE_HOOP_CLUT_X;
-        words[2] = (1u << 16) | 4u;   /* 4 entries (even width): the 4th as is */
-        words[3] = JAKE_HOOP_CLUT[0] | ((uint32_t)JAKE_HOOP_CLUT[1] << 16);
-        words[4] = JAKE_HOOP_CLUT[2] |
-                   ((uint32_t)gpu_vram_peek(JAKE_HOOP_CLUT_X + 3, JAKE_HOOP_CLUT_Y) << 16);
-        jake_link_packet(far_entry, words, 5u);
+        words[1] = ((uint32_t)swap->y << 16) | swap->x;
+        words[2] = (1u << 16) | swap->count;
+        for (k = 0; k < swap->count; k += 2)
+            words[3 + k / 2] = swap->ours[k] | ((uint32_t)swap->ours[k + 1] << 16);
+        jake_link_packet(far_entry, words, 3u + swap->count / 2u);
     }
     words[0] = 0xA0000000u;
     words[1] = ((uint32_t)JAKE_CLUT_Y << 16) | JAKE_CLUT_X;
