@@ -285,3 +285,18 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Verified: SPU 0x3A420 holds 0xD00 bytes, matches the approved clip at the same speed (corr 0.965); user
   confirmed in game. Extracted cutscene lines (game audio, not committed): modding/sfx/jake_cutscene,
   jake_ow_real.
+
+## 2026-10-05 Jake: purple gadgets (Play as Jake mod)
+- Club blade: model entry 0x800EC0F0 colour ptr (+4) -> our violet list (F80058/880030/F8A0B0 words) while it points
+  at stock blue/teal/white. Halo: glow beam 0x8002020C ra 0x8009AD34, a3 stock 0x00FF8080 -> 0x00BE005A (deep).
+  User: first purple read pink -> moved to violet (hue ~261).
+- Net: transform 0x80016A60 with ra 0x8009932C, a0 = net object (0x800E07D0); colours obj+4 (count u16 hdr+8 = 25
+  greyish blues) copied hue-shifted to 261 deg (lightness kept, sat x1.5 min 0.35) into mod memory, obj+4 repointed.
+- Spin trail: 0x8001F954 builds up to 12 quads (0x28 each: tag len 9, E1000220, 4x colour+vertex, code 0x3A) from
+  packet ptr 0x800EC354; colour = fade<<16 in code (blue only). Hook entry -> note start; at DrawOTag recolour
+  matching quads in place (red = fade/2). Found via gpu_frame_dump + wtrace_range on the packet address.
+- Gadgets compat: powered red blade check now accepts a colour list in mod memory (0x9F000000+, where mod allocs live;
+  first version only allowed game RAM so the powered blade stayed purple). purple -> red -> purple verified.
+- "Blade longer after spin then shrinks": stock. Blade model scale is constant 1.0 (draw matrix 0x8009ABF4 a0, after
+  undoing the 0.74 aspect row); the glow beam is a streak from the tip to a lagging point (a0/a1 at 0x8002020C).
+- Hooks: Jake branch 0x80016A60, 0x80028CC0, 0x8002020C, 0x8001F954; all-mods 13 (gadgets 12 + 0x8001F954).
