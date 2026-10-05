@@ -886,22 +886,64 @@ static int jake_ram_pointer(uint32_t p) {
     return p >= 0x80000000u && p < 0x80200000u;
 }
 
-static void jake_purple_club(void) {
-    const uint32_t entry = JAKE_CLUB_BLADE_ENTRY + 4u, colours = psx_mod_read_word(entry);
+/* Point a gadget model entry's colour list at ours while it still points at
+ * the stock one (so another mod's colours, e.g. the powered red club, are
+ * left alone). */
+static void jake_swap_colours(uint32_t model_entry, const uint32_t* stock, const uint32_t* ours,
+                              int count, uint32_t* list) {
+    const uint32_t entry = model_entry + 4u, colours = psx_mod_read_word(entry);
     int i;
-    if (!jake_ram_pointer(colours) || colours == g_club_purple)
+    if (!jake_ram_pointer(colours) || colours == *list)
         return;
-    for (i = 0; i < 3; ++i)
-        if (psx_mod_read_word(colours + (uint32_t)i * 4u) != JAKE_CLUB_STOCK[i])
-            return;   /* not the stock blade (e.g. powered red) */
-    if (g_club_purple == 0u) {
-        g_club_purple = psx_mod_alloc_guest_memory(16u, 16u);
-        if (g_club_purple == 0u)
+    for (i = 0; i < count; ++i)
+        if (psx_mod_read_word(colours + (uint32_t)i * 4u) != stock[i])
             return;
-        for (i = 0; i < 3; ++i)
-            psx_mod_write_word(g_club_purple + (uint32_t)i * 4u, JAKE_CLUB_PURPLE[i]);
+    if (*list == 0u) {
+        *list = psx_mod_alloc_guest_memory((uint32_t)count * 4u, 16u);
+        if (*list == 0u)
+            return;
+        for (i = 0; i < count; ++i)
+            psx_mod_write_word(*list + (uint32_t)i * 4u, ours[i]);
     }
-    psx_mod_write_word(entry, g_club_purple);
+    psx_mod_write_word(entry, *list);
+}
+
+static void jake_purple_club(void) {
+    jake_swap_colours(JAKE_CLUB_BLADE_ENTRY, JAKE_CLUB_STOCK, JAKE_CLUB_PURPLE, 3, &g_club_purple);
+}
+
+/*
+ * Super Hoop: model entry 0x800EC0A0, textured with a 4-bit stripe texture
+ * whose palette (VRAM 944,503; only the hoop uses it) is white, yellow and a
+ * dark edge, tinted by the model's cyan: white -> light blue, yellow ->
+ * green. Cyan has no red, so no tint can give purple: the tint goes neutral
+ * and the palette itself becomes blue (as the white stripes looked), violet
+ * (the club's) and the dark edge as it looked. The palette is uploaded with
+ * the face (jake_upload_face) whenever VRAM still holds the stock one.
+ */
+static const uint32_t JAKE_HOOP_ENTRY = 0x800EC0A0u;
+static const uint32_t JAKE_HOOP_STOCK[3] = { 0x00F8F800u, 0x00686868u, 0x00707070u };
+static const uint32_t JAKE_HOOP_NEUTRAL[3] = { 0x00808080u, 0x00686868u, 0x00707070u };
+enum { JAKE_HOOP_CLUT_X = 944, JAKE_HOOP_CLUT_Y = 503, JAKE_HOOP_CLUT_COLOURS = 3 };
+static const uint16_t JAKE_HOOP_CLUT_STOCK[JAKE_HOOP_CLUT_COLOURS] = { 0xFFFFu, 0x83FFu, 0xC950u };
+static const uint16_t JAKE_HOOP_CLUT[JAKE_HOOP_CLUT_COLOURS] = {
+    0xFFE0u,   /* blue (0, 31, 31), was white */
+    0xFC0Bu,   /* violet (11, 0, 31), was yellow */
+    0xFE60u    /* dark edge (0, 19, 31) as it looked tinted */
+};
+static uint32_t g_hoop_neutral;
+uint16_t gpu_vram_peek(int x, int y);
+
+static void jake_purple_hoop(void) {
+    jake_swap_colours(JAKE_HOOP_ENTRY, JAKE_HOOP_STOCK, JAKE_HOOP_NEUTRAL, 3, &g_hoop_neutral);
+}
+
+static int jake_hoop_clut_is_stock(void) {
+    int i;
+    for (i = 0; i < JAKE_HOOP_CLUT_COLOURS; ++i)
+        if (gpu_vram_peek(JAKE_HOOP_CLUT_X + i, JAKE_HOOP_CLUT_Y) != JAKE_HOOP_CLUT_STOCK[i])
+            return 0;
+    return 1;
 }
 
 static float jake_hue_channel(float p, float q, float t) {
@@ -1005,6 +1047,7 @@ static void jake_vblank(void) {
     if (!g_enabled)
         return;
     jake_purple_club();
+    jake_purple_hoop();
     if (ticks++ % JAKE_VOICE_CHECK_PERIOD == 0u)
         jake_install_voice();
     jake_outro_vblank();
@@ -1165,6 +1208,15 @@ static void jake_upload_face(uint32_t table) {
      * cache flush first (drawn after the copies), then the copies. */
     words[0] = 0x01000000u;
     jake_link_packet(far_entry, words, 1u);
+    if (jake_hoop_clut_is_stock()) {
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)JAKE_HOOP_CLUT_Y << 16) | JAKE_HOOP_CLUT_X;
+        words[2] = (1u << 16) | 4u;   /* 4 entries (even width): the 4th as is */
+        words[3] = JAKE_HOOP_CLUT[0] | ((uint32_t)JAKE_HOOP_CLUT[1] << 16);
+        words[4] = JAKE_HOOP_CLUT[2] |
+                   ((uint32_t)gpu_vram_peek(JAKE_HOOP_CLUT_X + 3, JAKE_HOOP_CLUT_Y) << 16);
+        jake_link_packet(far_entry, words, 5u);
+    }
     words[0] = 0xA0000000u;
     words[1] = ((uint32_t)JAKE_CLUT_Y << 16) | JAKE_CLUT_X;
     words[2] = (1u << 16) | 16u;
