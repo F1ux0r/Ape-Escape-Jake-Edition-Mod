@@ -27,7 +27,7 @@ strict = true
 # 0x8009AD60 = Slingback Shooter handler (draws it through 0x800E9E40).
 # 0x8002020C = glow beam (a0/a1 ends, a3 colour); the club's light halo.
 # 0x80028CC0 = DrawOTag (a0 = last ordering-table entry); grabber is linked in here.
-mod_function_entry_funcs = ["0x80016A60", "0x80028CC0", "0x8002020C"]
+mod_function_entry_funcs = ["0x80016A60", "0x80028CC0", "0x8002020C", "0x8001F954"]
 
 [runtime]
 debug_port = 4480

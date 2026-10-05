@@ -877,7 +877,7 @@ static const uint32_t JAKE_CLUB_HALO_RETURN = 0x8009AD34u;
 static const uint32_t JAKE_CLUB_HALO_STOCK = 0x00FF8080u;
 static const uint32_t JAKE_CLUB_HALO_PURPLE = 0x00BE005Au;   /* deep purple glow */
 static const uint32_t JAKE_NET_TRANSFORM_RETURN = 0x8009932Cu;
-static const float JAKE_PURPLE_HUE = 280.0f / 360.0f;
+static const float JAKE_PURPLE_HUE = 261.0f / 360.0f;   /* the club blade's violet */
 enum { JAKE_NET_MAX_COLOURS = 64 };
 
 static uint32_t g_club_purple, g_net_purple, g_net_source;
@@ -948,6 +948,50 @@ static void jake_purple_net(uint32_t object) {
         g_net_source = colours;
     }
     psx_mod_write_word(object + 4u, g_net_purple);
+}
+
+/*
+ * Club spin trail: 0x8001F954 writes up to 12 translucent gouraud quads from
+ * the packet pointer (0x800EC354) on, each 0x28 bytes: tag (length 9), draw
+ * mode 0xE1000220, then four colour + vertex pairs (code 0x3A). The colour is
+ * built in code as fade << 16, i.e. blue only, so there is nothing to change
+ * in memory: the start of each call's packets is noted here and, before the
+ * frame goes to the GPU (the DrawOTag hook), every quad that still matches
+ * that shape gets violet in place of blue, same fade.
+ */
+static const uint32_t JAKE_TRAIL_FUNCTION = 0x8001F954u;
+static const uint32_t JAKE_PACKET_POINTER = 0x800EC354u;
+static const uint32_t JAKE_TRAIL_DRAW_MODE = 0xE1000220u;
+enum { JAKE_TRAIL_QUAD = 0x28, JAKE_TRAIL_MAX_QUADS = 12, JAKE_TRAIL_MAX_CALLS = 8 };
+static uint32_t g_trail_starts[JAKE_TRAIL_MAX_CALLS];
+static uint32_t g_trail_count;
+
+static void jake_trail_entry(struct CPUState* cpu, uint32_t address) {
+    (void)cpu;
+    (void)address;
+    if (g_enabled && g_trail_count < JAKE_TRAIL_MAX_CALLS)
+        g_trail_starts[g_trail_count++] = psx_mod_read_word(JAKE_PACKET_POINTER);
+}
+
+static void jake_purple_trail(void) {
+    uint32_t c, q, k;
+    for (c = 0; c < g_trail_count; ++c) {
+        for (q = 0; q < JAKE_TRAIL_MAX_QUADS; ++q) {
+            const uint32_t p = g_trail_starts[c] + q * JAKE_TRAIL_QUAD;
+            if (!jake_ram_pointer(p) || psx_mod_read_byte(p + 3u) != 9u ||
+                psx_mod_read_word(p + 4u) != JAKE_TRAIL_DRAW_MODE || psx_mod_read_byte(p + 0xBu) != 0x3Au)
+                break;
+            for (k = 0; k < 4; ++k) {
+                const uint32_t at = p + 8u + k * 8u, w = psx_mod_read_word(at);
+                const uint32_t fade = (w >> 16) & 0xFFu;
+                if ((w & 0xFFFFu) != 0u)
+                    break;   /* already recoloured, or not ours */
+                /* violet: red at half the blue (less reads periwinkle over grass) */
+                psx_mod_write_word(at, (w & 0xFF000000u) | fade << 16 | (fade / 2u));
+            }
+        }
+    }
+    g_trail_count = 0;
 }
 
 static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
@@ -1915,6 +1959,7 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     uint32_t index;
     int i, k;
     (void)address;
+    jake_purple_trail();
     /* Keep the face in VRAM (level loads may write over that strip). */
     for (index = 0u; index < 2u; ++index) {
         const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;
@@ -1983,4 +2028,6 @@ PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
         "ape.characters.play-as-jake", JAKE_DRAW_OT_FUNCTION, jake_draw_ot_entry);
     (void)psx_mod_register_function_entry_plugin(
         "ape.characters.play-as-jake", JAKE_GLOW_BEAM_FUNCTION, jake_glow_beam_entry);
+    (void)psx_mod_register_function_entry_plugin(
+        "ape.characters.play-as-jake", JAKE_TRAIL_FUNCTION, jake_trail_entry);
 }
