@@ -2402,9 +2402,25 @@ static void jake_save_looks_tick(void) {
 }
 
 /* NORMAL / BRAINWASHED under the picture of each file on the load / save
- * screen whose look is recorded. The screen's dark side panel is in the
- * overlay list (table + 0x4000, drawn after the main table), so the labels
- * go on that list's end. */
+ * screen whose look is recorded. They go on the end of the overlay list
+ * (table + 0x4000, drawn after the main table, so over the screen's dark
+ * side panel) - and only on frames that draw that panel (raw textured
+ * quads from x 280 to 360, in the table's front entry): it is there
+ * exactly while the files are listed, not while the card is checked or a
+ * choice is confirmed. */
+static int jake_chain_has_panel(uint32_t at) {
+    int hops = 0;
+    at = psx_mod_read_word(at) & 0x00FFFFFFu;
+    while (at != 0x00FFFFFFu && at != 0u && hops++ < 2048) {
+        const uint32_t p = 0x80000000u | at;
+        if ((psx_mod_read_word(p) >> 24) >= 9u && (psx_mod_read_word(p + 4u) >> 24) == 0x2Du &&
+            (psx_mod_read_word(p + 8u) & 0xFFFFu) == 280u && (psx_mod_read_word(p + 16u) & 0xFFFFu) == 360u)
+            return 1;
+        at = psx_mod_read_word(p) & 0x00FFFFFFu;
+    }
+    return 0;
+}
+
 static void jake_draw_file_labels(uint32_t table, uint32_t index) {
     static uint32_t quads[2];
     uint32_t packet, old, q, n = 0;
@@ -2428,14 +2444,15 @@ static void jake_draw_file_labels(uint32_t table, uint32_t index) {
     {
         uint32_t last = table + 0x4000u, next = psx_mod_read_word(last) & 0x00FFFFFFu;
         int hops = 0;
+        const int panel = jake_chain_has_panel(table) || jake_chain_has_panel(table + 0x4000u);
         if (n == 0u)
             return;
         while (next != 0x00FFFFFFu && next != 0u && hops++ < 1024) {
             last = 0x80000000u | next;
             next = psx_mod_read_word(last) & 0x00FFFFFFu;
         }
-        if (next != 0x00FFFFFFu)
-            return;   /* list not as expected */
+        if (next != 0x00FFFFFFu || !panel)
+            return;   /* list not as expected, or the files aren't shown */
         for (q = 0; q < n; ++q)
             psx_mod_write_word(packet + q * 40u,
                                (9u << 24) | (q + 1u < n ? ((packet + (q + 1u) * 40u) & 0x00FFFFFFu)
