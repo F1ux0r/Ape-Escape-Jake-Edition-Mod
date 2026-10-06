@@ -2188,7 +2188,9 @@ static void jake_title_input(void) {
  *    +0x180, and each slot's bytes 0x2F0..0x5DF (progress) are loaded as
  *    they are to RAM 0x800DF81C, so a hash of them names the save;
  *  - a save is noticed by a card file changing (checked about once a
- *    second): every slot whose progress hash changed gets the current look;
+ *    second): every slot whose progress hash changed, or that matches the
+ *    progress being played (a save made with no new progress), gets the
+ *    current look;
  *  - the progress in RAM is hashed every few frames; when it changes to a
  *    known save's (the game loaded one, however long its menus took), that
  *    save's look is put back on.
@@ -2346,7 +2348,8 @@ static void jake_save_looks_tick(void) {
             continue;
         jake_card_hashes(card, hashes);
         for (slot = 0; g_card_seen[card] && slot < JAKE_SAVE_SLOTS; ++slot)
-            if (hashes[slot] != 0u && hashes[slot] != g_slot_hash[card][slot]) {
+            if (hashes[slot] != 0u &&
+                (hashes[slot] != g_slot_hash[card][slot] || hashes[slot] == last_ram_hash)) {
                 jake_save_looks_record(hashes[slot], g_look);
                 changed = 1;
             }
