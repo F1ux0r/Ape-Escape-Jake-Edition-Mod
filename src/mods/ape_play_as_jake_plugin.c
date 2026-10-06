@@ -2402,33 +2402,36 @@ static void jake_save_looks_tick(void) {
 }
 
 /* NORMAL / BRAINWASHED under the picture of each file on the load / save
- * screen whose look is recorded. They go on the end of the overlay list
- * (table + 0x4000, drawn after the main table, so over the screen's dark
- * side panel) - and only on frames that draw that panel (raw textured
- * quads from x 280 to 360, in the table's front entry): it is there
- * exactly while the files are listed, not while the card is checked or a
- * choice is confirmed. */
-static int jake_chain_has_panel(uint32_t at) {
+ * screen whose look is recorded. The screen's dark side panel (raw textured
+ * quads from x 280 to 360) is there exactly while the files are listed -
+ * not while the card is checked or a choice is confirmed - so the labels
+ * go in right after the panel's last quad: over it, and early in the
+ * frame. (Linked at the very end of the lists they were missing from
+ * about half the shown frames: this screen shows a buffer while it is
+ * still being drawn, and the end of the list often isn't there yet.) */
+static uint32_t jake_find_panel(uint32_t at) {
+    uint32_t found = 0u;
     int hops = 0;
     at = psx_mod_read_word(at) & 0x00FFFFFFu;
     while (at != 0x00FFFFFFu && at != 0u && hops++ < 2048) {
         const uint32_t p = 0x80000000u | at;
         if ((psx_mod_read_word(p) >> 24) >= 9u && (psx_mod_read_word(p + 4u) >> 24) == 0x2Du &&
             (psx_mod_read_word(p + 8u) & 0xFFFFu) == 280u && (psx_mod_read_word(p + 16u) & 0xFFFFu) == 360u)
-            return 1;
+            found = p;
         at = psx_mod_read_word(p) & 0x00FFFFFFu;
     }
-    return 0;
+    return found;
 }
 
 static void jake_draw_file_labels(uint32_t table, uint32_t index) {
     static uint32_t quads[2];
-    uint32_t packet, old, q, n = 0;
+    uint32_t packet, panel, q, n = 0;
     int slot;
     if (quads[index] == 0u)
         quads[index] = psx_mod_alloc_gpu_dma_memory(JAKE_SAVE_SLOTS * 40u, 16u);
     packet = quads[index];
-    if (packet == 0u)
+    panel = jake_find_panel(table);
+    if (packet == 0u || panel == 0u)
         return;
     for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot) {
         const int look = jake_save_look(g_screen_hash[slot]);
@@ -2441,24 +2444,15 @@ static void jake_draw_file_labels(uint32_t table, uint32_t index) {
                         FILE_LABEL_Y + slot * FILE_ROW_STEP, w, FILE_LABEL_H);
         ++n;
     }
+    if (n == 0u)
+        return;
     {
-        uint32_t last = table + 0x4000u, next = psx_mod_read_word(last) & 0x00FFFFFFu;
-        int hops = 0;
-        const int panel = jake_chain_has_panel(table) || jake_chain_has_panel(table + 0x4000u);
-        if (n == 0u)
-            return;
-        while (next != 0x00FFFFFFu && next != 0u && hops++ < 1024) {
-            last = 0x80000000u | next;
-            next = psx_mod_read_word(last) & 0x00FFFFFFu;
-        }
-        if (next != 0x00FFFFFFu || !panel)
-            return;   /* list not as expected, or the files aren't shown */
+        const uint32_t after = psx_mod_read_word(panel);
         for (q = 0; q < n; ++q)
             psx_mod_write_word(packet + q * 40u,
                                (9u << 24) | (q + 1u < n ? ((packet + (q + 1u) * 40u) & 0x00FFFFFFu)
-                                                       : 0x00FFFFFFu));
-        old = psx_mod_read_word(last);
-        psx_mod_write_word(last, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+                                                       : (after & 0x00FFFFFFu)));
+        psx_mod_write_word(panel, (after & 0xFF000000u) | (packet & 0x00FFFFFFu));
     }
 }
 
