@@ -2193,9 +2193,8 @@ static void jake_title_input(void) {
  *    like new saves); a save that changes nothing records nothing.
  *  - The load / save file screen (flag 0x800E3880 = 1, file cursor 0..3 at
  *    0x800E3886) keeps the card's block in RAM at 0x800E1880, exactly as
- *    on the card. While it is up, each file with a recorded look gets a
- *    small NORMAL / BRAINWASHED under its picture, and the file under the
- *    cursor is remembered; when the progress in RAM (0x800DF81C) then
+ *    on the card. While it is up, the file under the cursor is remembered
+ *    (labels under each picture: branch file-labels-wip, they flickered); when the progress in RAM (0x800DF81C) then
  *    changes (the game copies the save in while this screen is still up),
  *    a file was loaded and its look is put back on. Going back to
  *    the title forgets it.
@@ -2210,9 +2209,7 @@ enum {
     JAKE_CARDS = 2, JAKE_CARD_SIZE = 0x20000, JAKE_CARD_BLOCK = 0x2000,
     JAKE_SAVE_SLOTS = 4, JAKE_SLOT_FIRST = 0x180, JAKE_SLOT_SIZE = 0x7A0,
     JAKE_PROGRESS_LEN = 0x2F0,
-    JAKE_MAX_SAVES = 128, JAKE_CARD_CHECK = 60, JAKE_RAM_CHECK = 10,
-    /* file screen: picture of file n at x 288..352, y 32 + 48n .. +32 */
-    FILE_LABEL_CENTRE = 320, FILE_LABEL_Y = 66, FILE_ROW_STEP = 48, FILE_LABEL_H = 10
+    JAKE_MAX_SAVES = 128, JAKE_CARD_CHECK = 60, JAKE_RAM_CHECK = 10
 };
 static struct { uint64_t hash; uint8_t look; } g_saves[JAKE_MAX_SAVES];
 static int g_save_count;
@@ -2401,61 +2398,6 @@ static void jake_save_looks_tick(void) {
         jake_save_looks_write();
 }
 
-/* NORMAL / BRAINWASHED under the picture of each file on the load / save
- * screen whose look is recorded. The screen's dark side panel (raw textured
- * quads from x 280 to 360) is there exactly while the files are listed -
- * not while the card is checked or a choice is confirmed - so the labels
- * go in right after the panel's last quad: over it, and early in the
- * frame. (Linked at the very end of the lists they were missing from
- * about half the shown frames: this screen shows a buffer while it is
- * still being drawn, and the end of the list often isn't there yet.) */
-static uint32_t jake_find_panel(uint32_t at) {
-    uint32_t found = 0u;
-    int hops = 0;
-    at = psx_mod_read_word(at) & 0x00FFFFFFu;
-    while (at != 0x00FFFFFFu && at != 0u && hops++ < 2048) {
-        const uint32_t p = 0x80000000u | at;
-        if ((psx_mod_read_word(p) >> 24) >= 9u && (psx_mod_read_word(p + 4u) >> 24) == 0x2Du &&
-            (psx_mod_read_word(p + 8u) & 0xFFFFu) == 280u && (psx_mod_read_word(p + 16u) & 0xFFFFu) == 360u)
-            found = p;
-        at = psx_mod_read_word(p) & 0x00FFFFFFu;
-    }
-    return found;
-}
-
-static void jake_draw_file_labels(uint32_t table, uint32_t index) {
-    static uint32_t quads[2];
-    uint32_t packet, panel, q, n = 0;
-    int slot;
-    if (quads[index] == 0u)
-        quads[index] = psx_mod_alloc_gpu_dma_memory(JAKE_SAVE_SLOTS * 40u, 16u);
-    packet = quads[index];
-    panel = jake_find_panel(table);
-    if (packet == 0u || panel == 0u)
-        return;
-    for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot) {
-        const int look = jake_save_look(g_screen_hash[slot]);
-        const TitleRect* r = look == JAKE_NORMAL ? &TITLE_FILE_NORMAL : &TITLE_FILE_BRAIN;
-        int32_t w;
-        if (look < 0)
-            continue;
-        w = (int32_t)(r->w * FILE_LABEL_H * 12 / (r->h * 10));
-        jake_title_quad(packet + n * 40u, r, TITLE_TEXT_PALETTE, FILE_LABEL_CENTRE - w / 2,
-                        FILE_LABEL_Y + slot * FILE_ROW_STEP, w, FILE_LABEL_H);
-        ++n;
-    }
-    if (n == 0u)
-        return;
-    {
-        const uint32_t after = psx_mod_read_word(panel);
-        for (q = 0; q < n; ++q)
-            psx_mod_write_word(packet + q * 40u,
-                               (9u << 24) | (q + 1u < n ? ((packet + (q + 1u) * 40u) & 0x00FFFFFFu)
-                                                       : (after & 0x00FFFFFFu)));
-        psx_mod_write_word(panel, (after & 0xFF000000u) | (packet & 0x00FFFFFFu));
-    }
-}
-
 /* The frame's drawing is queued: give every swapped object its own mesh
  * back before anything animates it again. */
 static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
@@ -2477,7 +2419,7 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
             g_arena_index = (int)index;
             g_arena_used = 0u;
             jake_upload_face(table);
-            if (jake_on_title() || g_file_screen)
+            if (jake_on_title())
                 jake_upload_title(table);
         }
         if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu) {
@@ -2486,8 +2428,6 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
                 jake_title_input();
                 jake_draw_title(table, index);
             }
-            if (g_file_screen)
-                jake_draw_file_labels(table, index);
         }
     }
     if (g_enabled && g_jake_mesh_ready)
