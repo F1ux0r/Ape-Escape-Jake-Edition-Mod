@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /*
  * Play as Jake.
@@ -223,8 +224,9 @@ static uint16_t g_face_texels[JAKE_VRAM_W * JAKE_VRAM_H];
 static uint8_t g_disc_ok;
 
 /*
- * Two looks, picked with L1 on the title screen and remembered in
- * mods/play-as-jake.cfg: EVIL is Jake as he races you (the mesh above, red
+ * Two looks: every boot starts as NORMAL, and L1 on the title screen
+ * switches for that session (nothing is saved). EVIL (shown as
+ * BRAINWASHED) is Jake as he races you (the mesh above, red
  * slanted eyes, purple hair on the HUD), NORMAL is Jake before Specter gets
  * him, as in the opening cutscene (blue hair, big brown eyes). The normal
  * mesh is the intro's (USA disc 0x008AE9D0; its face quads' uvs are already
@@ -247,7 +249,7 @@ static uint16_t g_look_clut[JAKE_LOOKS][16];
 static uint16_t g_look_texels[JAKE_LOOKS][JAKE_VRAM_W * JAKE_VRAM_H];
 static uint32_t g_look_words[JAKE_LOOKS][5];
 static uint8_t g_look_ok[JAKE_LOOKS], g_look_built[JAKE_LOOKS];
-static int g_look = JAKE_EVIL;
+static int g_look = JAKE_NORMAL;   /* every boot; L1 on the title switches */
 static uint32_t g_jake_mesh[JAKE_MESH_WORDS];
 static uint8_t g_jake_mesh_ready;
 
@@ -2104,28 +2106,9 @@ static void jake_draw_title(uint32_t table, uint32_t index) {
 
 /* ---- The look toggle --------------------------------------------------- */
 
-static const char JAKE_LOOK_FILE[] = "mods/play-as-jake.cfg";
 /* Pad 1 as the driver left it: +2 buttons, active low; L1 = bit 10. */
 static const uint32_t JAKE_PAD1_BUTTONS = 0x800E52D2u;
 enum { JAKE_PAD_L1 = 1 << 10 };
-
-static void jake_load_look_setting(void) {
-    char text[32] = { 0 };
-    FILE* f = fopen(JAKE_LOOK_FILE, "rb");
-    if (!f)
-        return;
-    if (fread(text, 1, sizeof(text) - 1, f) > 0 && strncmp(text, "look=normal", 11) == 0)
-        g_look = JAKE_NORMAL;
-    fclose(f);
-}
-
-static void jake_save_look_setting(void) {
-    FILE* f = fopen(JAKE_LOOK_FILE, "wb");
-    if (!f)
-        return;
-    fputs(g_look == JAKE_NORMAL ? "look=normal\n" : "look=evil\n", f);
-    fclose(f);
-}
 
 /*
  * A switch click: the title menu's cursor sample (SPU 0x2BFC0, pitch
@@ -2188,12 +2171,191 @@ static void jake_title_input(void) {
         const int next = g_look == JAKE_NORMAL ? JAKE_EVIL : JAKE_NORMAL;
         if (g_look_built[next]) {
             jake_select_look(next);
-            jake_save_look_setting();
             jake_play_click(next == JAKE_NORMAL ? 0x3E0u : 0x2C0u);
             g_force_upload = 1u;
         }
     }
     was = pressed;
+}
+
+/* ---- Per-save look ----------------------------------------------------- */
+
+/*
+ * Every boot starts as NORMAL and L1 on the title switches; each save file
+ * then remembers the look it was saved with, in mods/play-as-jake-saves.cfg
+ * (nothing is added to the save itself):
+ *  - the game's card file BASCUS-94423SYS holds 4 slots of 0x7A0 bytes from
+ *    +0x180, and each slot's bytes 0x2F0..0x5DF (progress) are loaded as
+ *    they are to RAM 0x800DF81C, so a hash of them names the save;
+ *  - a save is noticed by a card file changing (checked about once a
+ *    second): every slot whose progress hash changed gets the current look;
+ *  - the progress in RAM is hashed every few frames; when it changes to a
+ *    known save's (the game loaded one, however long its menus took), that
+ *    save's look is put back on.
+ * Two saves with identical progress share one entry.
+ */
+static const char JAKE_SAVES_FILE[] = "mods/play-as-jake-saves.cfg";
+static const char JAKE_CARD_FILE_NAME[] = "BASCUS-94423SYS";
+static const uint32_t JAKE_PROGRESS_RAM = 0x800DF81Cu;
+enum {
+    JAKE_CARDS = 2, JAKE_CARD_SIZE = 0x20000, JAKE_CARD_BLOCK = 0x2000,
+    JAKE_SAVE_SLOTS = 4, JAKE_SLOT_FIRST = 0x180, JAKE_SLOT_SIZE = 0x7A0,
+    JAKE_PROGRESS_OFF = 0x2F0, JAKE_PROGRESS_LEN = 0x2F0,
+    JAKE_MAX_SAVES = 128, JAKE_CARD_CHECK = 60, JAKE_RAM_CHECK = 10
+};
+static struct { uint64_t hash; uint8_t look; } g_saves[JAKE_MAX_SAVES];
+static int g_save_count;
+static char g_card_path[JAKE_CARDS][512];
+static uint64_t g_slot_hash[JAKE_CARDS][JAKE_SAVE_SLOTS];
+static long long g_card_stamp[JAKE_CARDS];
+static uint8_t g_card_seen[JAKE_CARDS];
+
+static uint64_t jake_hash(const uint8_t* p, uint32_t n) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    uint32_t i, any = 0;
+    for (i = 0; i < n; ++i) {
+        h = (h ^ p[i]) * 0x100000001B3ull;
+        any |= p[i];
+    }
+    return any ? h : 0u;   /* 0 = an empty slot */
+}
+
+static void jake_save_looks_write(void) {
+    FILE* f = fopen(JAKE_SAVES_FILE, "wb");
+    int i;
+    if (!f)
+        return;
+    fputs("# Play as Jake: the look each save was made with (hash of its progress)\n", f);
+    for (i = 0; i < g_save_count; ++i)
+        fprintf(f, "%016llx %s\n", (unsigned long long)g_saves[i].hash,
+                g_saves[i].look == JAKE_NORMAL ? "normal" : "brainwashed");
+    fclose(f);
+}
+
+static void jake_save_looks_read(void) {
+    char line[128];
+    FILE* f = fopen(JAKE_SAVES_FILE, "rb");
+    if (!f)
+        return;
+    while (g_save_count < JAKE_MAX_SAVES && fgets(line, sizeof(line), f)) {
+        unsigned long long hash;
+        char word[32];
+        if (line[0] == '#' || sscanf(line, "%llx %31s", &hash, word) != 2)
+            continue;
+        g_saves[g_save_count].hash = hash;
+        g_saves[g_save_count].look = strcmp(word, "normal") == 0 ? JAKE_NORMAL : JAKE_EVIL;
+        ++g_save_count;
+    }
+    fclose(f);
+}
+
+static void jake_save_looks_record(uint64_t hash, int look) {
+    int i = 0;
+    while (i < g_save_count && g_saves[i].hash != hash)
+        ++i;
+    if (i == g_save_count) {
+        if (g_save_count == JAKE_MAX_SAVES) {   /* forget the oldest */
+            memmove(g_saves, g_saves + 1, sizeof(g_saves[0]) * (JAKE_MAX_SAVES - 1));
+            --g_save_count;
+            i = g_save_count;
+        }
+        ++g_save_count;
+    }
+    g_saves[i].hash = hash;
+    g_saves[i].look = (uint8_t)look;
+}
+
+/* The card paths from settings.toml ([memcard] card1 / card2). */
+static void jake_find_cards(void) {
+    char line[600];
+    FILE* f = fopen("settings.toml", "rb");
+    snprintf(g_card_path[0], sizeof(g_card_path[0]), "saves/card1.mcd");
+    snprintf(g_card_path[1], sizeof(g_card_path[1]), "saves/card2.mcd");
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f)) {
+        const int card = strncmp(line, "card1", 5) == 0 ? 0 : strncmp(line, "card2", 5) == 0 ? 1 : -1;
+        char* q0 = strchr(line, '"');
+        char* q1 = q0 ? strchr(q0 + 1, '"') : NULL;
+        if (card >= 0 && q1) {
+            *q1 = '\0';
+            snprintf(g_card_path[card], sizeof(g_card_path[card]), "%s", q0 + 1);
+        }
+    }
+    fclose(f);
+}
+
+/* Progress hashes of the card's slots; 0 for each if the card has no save. */
+static void jake_card_hashes(int card, uint64_t* hashes) {
+    static uint8_t data[JAKE_CARD_SIZE];
+    FILE* f = fopen(g_card_path[card], "rb");
+    int frame, slot;
+    memset(hashes, 0, sizeof(uint64_t) * JAKE_SAVE_SLOTS);
+    if (!f)
+        return;
+    if (fread(data, 1, sizeof(data), f) != sizeof(data)) {
+        fclose(f);
+        return;
+    }
+    fclose(f);
+    for (frame = 1; frame < 16; ++frame) {
+        const uint8_t* dir = data + frame * 128;
+        if ((dir[0] & 0xF0u) == 0x50u &&
+            strncmp((const char*)dir + 10, JAKE_CARD_FILE_NAME, sizeof(JAKE_CARD_FILE_NAME)) == 0) {
+            for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot)
+                hashes[slot] = jake_hash(data + frame * JAKE_CARD_BLOCK + JAKE_SLOT_FIRST +
+                                             slot * JAKE_SLOT_SIZE + JAKE_PROGRESS_OFF,
+                                         JAKE_PROGRESS_LEN);
+            return;
+        }
+    }
+}
+
+static void jake_save_looks_tick(void) {
+    static uint32_t frames;
+    static uint64_t last_ram_hash;
+    int card, slot, changed = 0;
+    if (frames % JAKE_RAM_CHECK == 0u) {
+        uint8_t progress[JAKE_PROGRESS_LEN];
+        uint64_t hash;
+        int i;
+        for (i = 0; i < JAKE_PROGRESS_LEN; ++i)
+            progress[i] = psx_mod_read_byte(JAKE_PROGRESS_RAM + (uint32_t)i);
+        hash = jake_hash(progress, JAKE_PROGRESS_LEN);
+        for (i = 0; hash != last_ram_hash && hash != 0u && i < g_save_count; ++i) {
+            if (g_saves[i].hash != hash)
+                continue;
+            if (g_saves[i].look != g_look && g_look_built[g_saves[i].look]) {
+                jake_select_look(g_saves[i].look);
+                g_force_upload = 1u;
+            }
+            break;
+        }
+        last_ram_hash = hash;
+    }
+    if (frames++ % JAKE_CARD_CHECK != 0u)
+        return;
+    for (card = 0; card < JAKE_CARDS; ++card) {
+        struct stat st;
+        uint64_t hashes[JAKE_SAVE_SLOTS];
+        long long stamp;
+        if (stat(g_card_path[card], &st) != 0)
+            continue;
+        stamp = (long long)st.st_mtime * 1000003LL + (long long)st.st_size;
+        if (g_card_seen[card] && stamp == g_card_stamp[card])
+            continue;
+        jake_card_hashes(card, hashes);
+        for (slot = 0; g_card_seen[card] && slot < JAKE_SAVE_SLOTS; ++slot)
+            if (hashes[slot] != 0u && hashes[slot] != g_slot_hash[card][slot]) {
+                jake_save_looks_record(hashes[slot], g_look);
+                changed = 1;
+            }
+        memcpy(g_slot_hash[card], hashes, sizeof(hashes));
+        g_card_stamp[card] = stamp;
+        g_card_seen[card] = 1u;
+    }
+    if (changed)
+        jake_save_looks_write();
 }
 
 /* The frame's drawing is queued: give every swapped object its own mesh
@@ -2204,6 +2366,8 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     int i, k;
     (void)address;
     jake_purple_trail();
+    if (g_enabled && g_jake_mesh_ready)
+        jake_save_looks_tick();
     /* Keep the face in VRAM (level loads may write over that strip). */
     for (index = 0u; index < 2u; ++index) {
         const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;
@@ -2258,7 +2422,8 @@ static void jake_load_voice(void) {
 
 static void jake_activate(void) {
     g_enabled = 1u;
-    jake_load_look_setting();
+    jake_find_cards();
+    jake_save_looks_read();
     jake_load_disc();
     jake_load_voice();
 }
