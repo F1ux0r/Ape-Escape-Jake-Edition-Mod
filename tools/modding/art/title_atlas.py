@@ -1,5 +1,5 @@
 """Title-screen atlas for the play-as-jake plugin (all our own art):
-'JAKE EDITION', the NORMAL / EVIL labels, a 'PRESS L1 TO SWAP' hint and the
+'JAKE EDITION', the NORMAL / BRAINWASHED labels, a 'PRESS L1 TO SWAP' hint and the
 'Mod By Flux / x.com/F1ux0r' credit, one shared 15-colour palette. 256 wide, 4-bit; writes title_atlas.inc."""
 import sys
 from PIL import Image, ImageFont
@@ -35,7 +35,7 @@ def fit(im, w, h):
 texts = {
     "edition": (T.build_rgba(), 1, 0),
     "normal": (fit(logo_text("NORMAL", 40, 5), 120, 24), 0, 62),
-    "evil": (fit(logo_text("EVIL", 40, 5), 120, 24), 128, 62),
+    "evil": (fit(logo_text("BRAINWASHED", 40, 4, bounce=(0, -1, 1, 0, 1, -1, 0, 1, -1, 0, 1), tilt=(-3, 2, -2, 3, -2, 2, 0, 3, -2, 2, -3)), 176, 24), 80, 86),
     "hint": (fit(hint_text(["PRESS L1", "TO SWAP"], 30), 80, 24), 176, 62),
     "credit": (fit(hint_text(["Mod By Flux", "x.com/F1ux0r"], 30, CREDIT_FONT, "right"), 128, 24), 0, 86),
 }
