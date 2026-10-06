@@ -2183,27 +2183,36 @@ static void jake_title_input(void) {
 /*
  * Every boot starts as NORMAL and L1 on the title switches; each save file
  * then remembers the look it was saved with, in mods/play-as-jake-saves.cfg
- * (nothing is added to the save itself):
- *  - the game's card file BASCUS-94423SYS holds 4 slots of 0x7A0 bytes from
- *    +0x180, and each slot's bytes 0x2F0..0x5DF (progress) are loaded as
- *    they are to RAM 0x800DF81C, so a hash of them names the save;
- *  - a save is noticed by a card file changing (checked about once a
- *    second): every slot whose progress hash changed, or that matches the
- *    progress being played (a save made with no new progress), gets the
- *    current look;
- *  - the progress in RAM is hashed every few frames; when it changes to a
- *    known save's (the game loaded one, however long its menus took), that
- *    save's look is put back on.
- * Two saves with identical progress share one entry.
+ * (nothing is added to the save itself). A save is named by a hash of its
+ * whole slot: the game's card file BASCUS-94423SYS holds 4 slots of 0x7A0
+ * bytes from +0x180 (an empty slot starts 0xFFFF).
+ *  - Saving: the card files are checked about once a second; every slot
+ *    whose contents changed gets the current look. Only complete reads that
+ *    hold the game's file count (the emulator rewrites the card file now and
+ *    then, e.g. on savestate loads, and a half-written read must not look
+ *    like new saves); a save that changes nothing records nothing.
+ *  - The load / save file screen (flag 0x800E3880 = 1, file cursor 0..3 at
+ *    0x800E3886) keeps the card's block in RAM at 0x800E1880, exactly as
+ *    on the card. While it is up, each file with a recorded look gets a
+ *    small NORMAL / BRAINWASHED under its picture, and the file under the
+ *    cursor is remembered; when the progress in RAM (0x800DF81C) then
+ *    changes (the game copies the save in while this screen is still up),
+ *    a file was loaded and its look is put back on. Going back to
+ *    the title forgets it.
  */
 static const char JAKE_SAVES_FILE[] = "mods/play-as-jake-saves.cfg";
 static const char JAKE_CARD_FILE_NAME[] = "BASCUS-94423SYS";
 static const uint32_t JAKE_PROGRESS_RAM = 0x800DF81Cu;
+static const uint32_t JAKE_FILE_SCREEN = 0x800E3880u;
+static const uint32_t JAKE_FILE_CURSOR = 0x800E3886u;
+static const uint32_t JAKE_FILE_BLOCK = 0x800E1880u;
 enum {
     JAKE_CARDS = 2, JAKE_CARD_SIZE = 0x20000, JAKE_CARD_BLOCK = 0x2000,
     JAKE_SAVE_SLOTS = 4, JAKE_SLOT_FIRST = 0x180, JAKE_SLOT_SIZE = 0x7A0,
-    JAKE_PROGRESS_OFF = 0x2F0, JAKE_PROGRESS_LEN = 0x2F0,
-    JAKE_MAX_SAVES = 128, JAKE_CARD_CHECK = 60, JAKE_RAM_CHECK = 10
+    JAKE_PROGRESS_LEN = 0x2F0,
+    JAKE_MAX_SAVES = 128, JAKE_CARD_CHECK = 60, JAKE_RAM_CHECK = 10,
+    /* file screen: picture of file n at x 288..352, y 32 + 48n .. +32 */
+    FILE_LABEL_CENTRE = 320, FILE_LABEL_Y = 66, FILE_ROW_STEP = 48, FILE_LABEL_H = 10
 };
 static struct { uint64_t hash; uint8_t look; } g_saves[JAKE_MAX_SAVES];
 static int g_save_count;
@@ -2211,15 +2220,30 @@ static char g_card_path[JAKE_CARDS][512];
 static uint64_t g_slot_hash[JAKE_CARDS][JAKE_SAVE_SLOTS];
 static long long g_card_stamp[JAKE_CARDS];
 static uint8_t g_card_seen[JAKE_CARDS];
+static uint64_t g_screen_hash[JAKE_SAVE_SLOTS];   /* files on the file screen */
+static uint8_t g_file_screen;
 
 static uint64_t jake_hash(const uint8_t* p, uint32_t n) {
     uint64_t h = 0xCBF29CE484222325ull;
-    uint32_t i, any = 0;
-    for (i = 0; i < n; ++i) {
+    uint32_t i;
+    for (i = 0; i < n; ++i)
         h = (h ^ p[i]) * 0x100000001B3ull;
-        any |= p[i];
-    }
-    return any ? h : 0u;   /* 0 = an empty slot */
+    return h;
+}
+
+/* A slot's name, or 0 if it is empty. */
+static uint64_t jake_slot_hash(const uint8_t* slot) {
+    if (slot[0] == 0xFFu && slot[1] == 0xFFu)
+        return 0u;
+    return jake_hash(slot, JAKE_SLOT_SIZE);
+}
+
+static int jake_save_look(uint64_t hash) {
+    int i;
+    for (i = 0; hash != 0u && i < g_save_count; ++i)
+        if (g_saves[i].hash == hash)
+            return g_saves[i].look;
+    return -1;
 }
 
 static void jake_save_looks_write(void) {
@@ -2227,7 +2251,7 @@ static void jake_save_looks_write(void) {
     int i;
     if (!f)
         return;
-    fputs("# Play as Jake: the look each save was made with (hash of its progress)\n", f);
+    fputs("# Play as Jake: the look each save was made with (hash of its save slot)\n", f);
     for (i = 0; i < g_save_count; ++i)
         fprintf(f, "%016llx %s\n", (unsigned long long)g_saves[i].hash,
                 g_saves[i].look == JAKE_NORMAL ? "normal" : "brainwashed");
@@ -2287,17 +2311,18 @@ static void jake_find_cards(void) {
     fclose(f);
 }
 
-/* Progress hashes of the card's slots; 0 for each if the card has no save. */
-static void jake_card_hashes(int card, uint64_t* hashes) {
+/* Slot hashes of a card file (0 = empty slot); 0 if the file could not be
+ * read whole or has no Ape Escape save on it. */
+static int jake_card_hashes(int card, uint64_t* hashes) {
     static uint8_t data[JAKE_CARD_SIZE];
     FILE* f = fopen(g_card_path[card], "rb");
     int frame, slot;
     memset(hashes, 0, sizeof(uint64_t) * JAKE_SAVE_SLOTS);
     if (!f)
-        return;
+        return 0;
     if (fread(data, 1, sizeof(data), f) != sizeof(data)) {
         fclose(f);
-        return;
+        return 0;
     }
     fclose(f);
     for (frame = 1; frame < 16; ++frame) {
@@ -2305,35 +2330,50 @@ static void jake_card_hashes(int card, uint64_t* hashes) {
         if ((dir[0] & 0xF0u) == 0x50u &&
             strncmp((const char*)dir + 10, JAKE_CARD_FILE_NAME, sizeof(JAKE_CARD_FILE_NAME)) == 0) {
             for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot)
-                hashes[slot] = jake_hash(data + frame * JAKE_CARD_BLOCK + JAKE_SLOT_FIRST +
-                                             slot * JAKE_SLOT_SIZE + JAKE_PROGRESS_OFF,
-                                         JAKE_PROGRESS_LEN);
-            return;
+                hashes[slot] = jake_slot_hash(data + frame * JAKE_CARD_BLOCK + JAKE_SLOT_FIRST +
+                                              slot * JAKE_SLOT_SIZE);
+            return 1;
         }
     }
+    return 0;
+}
+
+static uint64_t jake_ram_hash(uint32_t addr, uint32_t len, int as_slot) {
+    static uint8_t buf[JAKE_SLOT_SIZE];
+    uint32_t i;
+    for (i = 0; i < len; ++i)
+        buf[i] = psx_mod_read_byte(addr + i);
+    return as_slot ? jake_slot_hash(buf) : jake_hash(buf, len);
 }
 
 static void jake_save_looks_tick(void) {
     static uint32_t frames;
-    static uint64_t last_ram_hash;
+    static uint64_t last_progress, pending;
     int card, slot, changed = 0;
+    const uint8_t cursor = psx_mod_read_byte(JAKE_FILE_CURSOR);
+    g_file_screen = (uint8_t)(psx_mod_read_byte(JAKE_FILE_SCREEN) == 1u &&
+                              psx_mod_read_byte(JAKE_FILE_BLOCK) == 'S' &&
+                              psx_mod_read_byte(JAKE_FILE_BLOCK + 1u) == 'C');
+    if (g_file_screen && frames % JAKE_RAM_CHECK == 0u) {
+        for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot)
+            g_screen_hash[slot] = jake_ram_hash(JAKE_FILE_BLOCK + JAKE_SLOT_FIRST +
+                                                (uint32_t)slot * JAKE_SLOT_SIZE, JAKE_SLOT_SIZE, 1);
+        if (cursor < JAKE_SAVE_SLOTS)
+            pending = g_screen_hash[cursor];
+    }
+    if (jake_on_title())
+        pending = 0u;
     if (frames % JAKE_RAM_CHECK == 0u) {
-        uint8_t progress[JAKE_PROGRESS_LEN];
-        uint64_t hash;
-        int i;
-        for (i = 0; i < JAKE_PROGRESS_LEN; ++i)
-            progress[i] = psx_mod_read_byte(JAKE_PROGRESS_RAM + (uint32_t)i);
-        hash = jake_hash(progress, JAKE_PROGRESS_LEN);
-        for (i = 0; hash != last_ram_hash && hash != 0u && i < g_save_count; ++i) {
-            if (g_saves[i].hash != hash)
-                continue;
-            if (g_saves[i].look != g_look && g_look_built[g_saves[i].look]) {
-                jake_select_look(g_saves[i].look);
+        const uint64_t progress = jake_ram_hash(JAKE_PROGRESS_RAM, JAKE_PROGRESS_LEN, 0);
+        if (progress != last_progress && pending != 0u) {   /* loaded (copied while the screen is still up) */
+            const int look = jake_save_look(pending);
+            if (look >= 0 && look != g_look && g_look_built[look]) {
+                jake_select_look(look);
                 g_force_upload = 1u;
             }
-            break;
+            pending = 0u;
         }
-        last_ram_hash = hash;
+        last_progress = progress;
     }
     if (frames++ % JAKE_CARD_CHECK != 0u)
         return;
@@ -2346,10 +2386,10 @@ static void jake_save_looks_tick(void) {
         stamp = (long long)st.st_mtime * 1000003LL + (long long)st.st_size;
         if (g_card_seen[card] && stamp == g_card_stamp[card])
             continue;
-        jake_card_hashes(card, hashes);
+        if (!jake_card_hashes(card, hashes))
+            continue;   /* try again next check */
         for (slot = 0; g_card_seen[card] && slot < JAKE_SAVE_SLOTS; ++slot)
-            if (hashes[slot] != 0u &&
-                (hashes[slot] != g_slot_hash[card][slot] || hashes[slot] == last_ram_hash)) {
+            if (hashes[slot] != 0u && hashes[slot] != g_slot_hash[card][slot]) {
                 jake_save_looks_record(hashes[slot], g_look);
                 changed = 1;
             }
@@ -2359,6 +2399,50 @@ static void jake_save_looks_tick(void) {
     }
     if (changed)
         jake_save_looks_write();
+}
+
+/* NORMAL / BRAINWASHED under the picture of each file on the load / save
+ * screen whose look is recorded. The screen's dark side panel is in the
+ * overlay list (table + 0x4000, drawn after the main table), so the labels
+ * go on that list's end. */
+static void jake_draw_file_labels(uint32_t table, uint32_t index) {
+    static uint32_t quads[2];
+    uint32_t packet, old, q, n = 0;
+    int slot;
+    if (quads[index] == 0u)
+        quads[index] = psx_mod_alloc_gpu_dma_memory(JAKE_SAVE_SLOTS * 40u, 16u);
+    packet = quads[index];
+    if (packet == 0u)
+        return;
+    for (slot = 0; slot < JAKE_SAVE_SLOTS; ++slot) {
+        const int look = jake_save_look(g_screen_hash[slot]);
+        const TitleRect* r = look == JAKE_NORMAL ? &TITLE_FILE_NORMAL : &TITLE_FILE_BRAIN;
+        int32_t w;
+        if (look < 0)
+            continue;
+        w = (int32_t)(r->w * FILE_LABEL_H * 12 / (r->h * 10));
+        jake_title_quad(packet + n * 40u, r, TITLE_TEXT_PALETTE, FILE_LABEL_CENTRE - w / 2,
+                        FILE_LABEL_Y + slot * FILE_ROW_STEP, w, FILE_LABEL_H);
+        ++n;
+    }
+    {
+        uint32_t last = table + 0x4000u, next = psx_mod_read_word(last) & 0x00FFFFFFu;
+        int hops = 0;
+        if (n == 0u)
+            return;
+        while (next != 0x00FFFFFFu && next != 0u && hops++ < 1024) {
+            last = 0x80000000u | next;
+            next = psx_mod_read_word(last) & 0x00FFFFFFu;
+        }
+        if (next != 0x00FFFFFFu)
+            return;   /* list not as expected */
+        for (q = 0; q < n; ++q)
+            psx_mod_write_word(packet + q * 40u,
+                               (9u << 24) | (q + 1u < n ? ((packet + (q + 1u) * 40u) & 0x00FFFFFFu)
+                                                       : 0x00FFFFFFu));
+        old = psx_mod_read_word(last);
+        psx_mod_write_word(last, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
+    }
 }
 
 /* The frame's drawing is queued: give every swapped object its own mesh
@@ -2382,7 +2466,7 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
             g_arena_index = (int)index;
             g_arena_used = 0u;
             jake_upload_face(table);
-            if (jake_on_title())
+            if (jake_on_title() || g_file_screen)
                 jake_upload_title(table);
         }
         if (g_enabled && g_jake_mesh_ready && cpu->gpr[4] == table + 0x3FFCu) {
@@ -2391,6 +2475,8 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
                 jake_title_input();
                 jake_draw_title(table, index);
             }
+            if (g_file_screen)
+                jake_draw_file_labels(table, index);
         }
     }
     if (g_enabled && g_jake_mesh_ready)
