@@ -329,3 +329,15 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   sprites, palette 704,505 x a teal tint from the particle array (24 x 0x66 at 0x800E07F0, colour u16 +0x30/32/34);
   user chose to KEEP the green sparkles, so no sparkle change. Orb haze palette 704,498 is greyscale (generic glow).
   Note: heavy back-to-back gpu_frame_dump calls trigger the slow_frames watchdog dump and stall the debug server.
+
+## 2026-10-05 Jake: per-save look + file-screen labels
+- Boot = NORMAL; L1 on title switches. Per-save look in build/mods/play-as-jake-saves.cfg keyed by FNV hash of the
+  whole card slot (BASCUS-94423SYS: 4 x 0x7A0 from +0x180; empty slot starts FFFF). The 0x2F0..0x5DF "progress"
+  block alone was identical for different saves - don't key on it.
+- File screen: flag 0x800E3880 = 1, cursor 0x800E3886, card block mirrored at 0x800E1880 (== card bytes). Load =
+  RAM progress (0x800DF81C) changes while a file is pending (game copies it while the screen is still up).
+  Save = card file slot hash changes (only trust complete reads with the game file; the emulator rewrites the card
+  file e.g. on savestate loads). Menu: title starts on LOAD GAME -> X; Down, X; pick file, X; Up to Yes, X.
+- Labels under each picture (x 288..352, y 32+48n) only on frames that draw the side panel (0x2D quads x 280..360).
+  GOTCHA: this screen presents a buffer while it is still being drawn - packets at the END of the OT were missing
+  from ~50% of shown frames (also true for an untextured box). Insert right after the panel quads instead.
