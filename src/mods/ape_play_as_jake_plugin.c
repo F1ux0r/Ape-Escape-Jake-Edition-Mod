@@ -2003,7 +2003,7 @@ enum {
     EDITION_W = 108, EDITION_H = 22,
     LABEL_CENTRE = 338, LABEL_Y = 27, LABEL_H = 15,          /* the look, top right */
     HINT_Y = 9, HINT_H = 16,                                 /* PRESS L1 / TO SWAP above it */
-    CREDIT_RIGHT = 378, CREDIT_Y = 208, CREDIT_H = 24,       /* Mod By Flux, bottom right */
+    CREDIT_RIGHT = 381, CREDIT_Y = 216, CREDIT_H = 22,       /* Mod By Flux, bottom right */
     TITLE_QUADS = 4
 };
 static uint32_t g_title_quads[2];
