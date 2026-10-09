@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -235,13 +236,19 @@ static uint8_t g_disc_ok;
  * format). Both faces use the same VRAM slot and palette position.
  */
 enum { JAKE_EVIL, JAKE_NORMAL, JAKE_LOOKS };
+/* Meshes are in KKIIDDZZ.DAT; face_file holds the palette + packed image. All
+ * offsets are within their file (USA disc user-data offsets 0x033E23EC /
+ * 0x033BDCB0 evil, 0x008AE9D0 / 0x06625764 normal). */
+static const char JAKE_DAT_FILE[] = "KKIIDDZZ.DAT";
 static const struct {
-    uint32_t mesh, mesh_size, clut, image, image_size;
+    uint32_t mesh, mesh_size;
+    const char* face_file;
+    uint32_t clut, image, image_size;
     uint8_t signature[12];
 } JAKE_LOOK_DISC[JAKE_LOOKS] = {
-    { 0x033E23ECu, 0x1E38u, 0x033BDCB0u, 0x033BDCB0u + 0x2Cu, 0x1C4u - 12u,
+    { 0x033303ECu, 0x1E38u, JAKE_DAT_FILE, 0x0330BCB0u, 0x0330BCB0u + 0x2Cu, 0x1C4u - 12u,
       { 0x20, 0x00, 0x36, 0x01, 0x12, 0x00, 0x25, 0x01, 0x24, 0x00, 0x00, 0x00 } },
-    { 0x008AE9D0u, 0x1D8Cu, 0x06625764u, 0x06625790u, 0x2CCu - 12u,
+    { 0x007FC9D0u, 0x1D8Cu, "DEMO/OP.ALL", 0x00000F64u, 0x00000F90u, 0x2CCu - 12u,
       { 0x22, 0x00, 0x27, 0x01, 0x12, 0x00, 0x0F, 0x01, 0x67, 0x00, 0x00, 0x00 } },
 };
 static uint8_t g_look_mesh[JAKE_LOOKS][0x1E38];
@@ -278,7 +285,9 @@ static uint8_t g_have_tail;
 
 /* ---- Disc -------------------------------------------------------------- */
 
-/* The .bin next to the .cue named by disc.cfg (the runtime's own config). */
+/* The .bin next to the .cue named by disc.cfg (the runtime's own config).
+ * Only the XA 'ouch' still uses this; everything else is read through
+ * psx_mod_read_disc_file. */
 static int jake_disc_path(char* out, size_t size) {
     char cue[1024], line[1024];
     FILE* f = fopen("disc.cfg", "rb");
@@ -314,22 +323,6 @@ static int jake_disc_path(char* out, size_t size) {
     return out[0] != '\0';
 }
 
-/* Mode 2 Form 1 user data at a user-data byte offset. */
-static int jake_read_disc(FILE* f, uint32_t offset, uint8_t* out, uint32_t size) {
-    while (size > 0) {
-        const uint32_t sector = offset / 2048u, within = offset % 2048u;
-        uint32_t chunk = 2048u - within;
-        if (chunk > size)
-            chunk = size;
-        if (fseek(f, (long)sector * 2352L + 24L + (long)within, SEEK_SET) != 0 ||
-            fread(out, 1, chunk, f) != chunk)
-            return 0;
-        out += chunk;
-        offset += chunk;
-        size -= chunk;
-    }
-    return 1;
-}
 
 static void jake_unpack_face(const uint8_t* packed, uint32_t size, uint16_t* texels) {
     uint8_t pixels[JAKE_VRAM_W * 4 * JAKE_VRAM_H];
@@ -352,20 +345,49 @@ static void jake_unpack_face(const uint8_t* packed, uint32_t size, uint16_t* tex
                                       (pixels[k * 4 + 2] << 8) | (pixels[k * 4 + 3] << 12));
 }
 
-static void jake_load_disc(void) {
-    char path[1024];
-    uint8_t clut[32], packed[0x400];
-    FILE* f;
-    int k, look;
-    if (!jake_disc_path(path, sizeof(path)) || !(f = fopen(path, "rb"))) {
-        fprintf(stderr, "play-as-jake: disc image not found\n");
-        return;
+/*
+ * A whole file from the disc the game has mounted, read through the runtime,
+ * so it works for any image the game itself accepts (.cue/.bin, .chd, ...)
+ * however the game was launched. The runtime only hands out whole files, so
+ * the 56 MB KKIIDDZZ.DAT is read once and freed after the pieces are copied.
+ */
+typedef struct {
+    uint8_t* data;
+    uint32_t size;
+} JakeDiscFile;
+
+static JakeDiscFile jake_disc_file(const char* name) {
+    JakeDiscFile file = { NULL, 0u };
+    uint32_t size = 0u;
+    if (!psx_mod_read_disc_file(name, NULL, 0u, &size) || size == 0u ||
+        !(file.data = (uint8_t*)malloc(size)))
+        return file;
+    if (!psx_mod_read_disc_file(name, file.data, size, &file.size)) {
+        free(file.data);
+        file.data = NULL;
+        file.size = 0u;
     }
+    return file;
+}
+
+static int jake_disc_piece(const JakeDiscFile* file, uint32_t offset, uint8_t* out, uint32_t size) {
+    if (!file->data || offset > file->size || size > file->size - offset)
+        return 0;
+    memcpy(out, file->data + offset, size);
+    return 1;
+}
+
+static void jake_load_disc(const JakeDiscFile* dat) {
+    uint8_t clut[32], packed[0x400];
+    int k, look;
     for (look = 0; look < JAKE_LOOKS; ++look) {
         const uint32_t size = JAKE_LOOK_DISC[look].mesh_size;
-        if (jake_read_disc(f, JAKE_LOOK_DISC[look].mesh, g_look_mesh[look], size) &&
-            jake_read_disc(f, JAKE_LOOK_DISC[look].clut, clut, sizeof(clut)) &&
-            jake_read_disc(f, JAKE_LOOK_DISC[look].image, packed, JAKE_LOOK_DISC[look].image_size) &&
+        JakeDiscFile face = { dat->data, dat->size };
+        if (strcmp(JAKE_LOOK_DISC[look].face_file, JAKE_DAT_FILE) != 0)
+            face = jake_disc_file(JAKE_LOOK_DISC[look].face_file);
+        if (jake_disc_piece(dat, JAKE_LOOK_DISC[look].mesh, g_look_mesh[look], size) &&
+            jake_disc_piece(&face, JAKE_LOOK_DISC[look].clut, clut, sizeof(clut)) &&
+            jake_disc_piece(&face, JAKE_LOOK_DISC[look].image, packed, JAKE_LOOK_DISC[look].image_size) &&
             memcmp(g_look_mesh[look], JAKE_LOOK_DISC[look].signature, 12) == 0) {
             for (k = 0; k < 16; ++k)
                 g_look_clut[look][k] = (uint16_t)(clut[k * 2] | (clut[k * 2 + 1] << 8));
@@ -375,11 +397,12 @@ static void jake_load_disc(void) {
             fprintf(stderr, "play-as-jake: Jake's %s look was not found on this disc\n",
                     look == JAKE_EVIL ? "evil" : "normal");
         }
+        if (face.data != dat->data)
+            free(face.data);
     }
     g_disc_ok = g_look_ok[JAKE_EVIL];
     if (!g_look_ok[g_look])
         g_look = JAKE_EVIL;
-    fclose(f);
 }
 
 /* ---- Voice ------------------------------------------------------------- */
@@ -410,7 +433,8 @@ static void jake_load_disc(void) {
  */
 uint32_t spu_ram_peek(uint32_t addr, uint8_t* out, uint32_t len);
 
-static const uint32_t JAKE_DISC_VOICE = 0x002E9948u;
+/* Offsets within KKIIDDZZ.DAT (USA disc user-data offset 0x002E9948). */
+static const uint32_t JAKE_DISC_VOICE = 0x00237948u;
 enum {
     JAKE_VOICE_SIZE = 0xDE0,
     JAKE_VOICE_PITCH = 0x5D2,
@@ -442,11 +466,11 @@ static struct {
     uint8_t jake[SPIKE_YELL_MAX_SIZE];
     uint32_t jake_size;
 } g_yells[] = {
-    { 0x38F00u, 0xC30u, 0x00159EF0u, JAKE_YELL },    /* double jump */
-    { 0x39B40u, 0x8D0u, 0x0015AB30u, JAKE_YELL },    /* Stun Club swing */
-    { 0x38560u, 0x990u, 0x00159550u, JAKE_SILENT },  /* Stun Club spin, catch */
-    { 0x36B30u, 0x1A20u, 0x00157B20u, JAKE_SILENT }, /* "Gotcha!" */
-    { 0x3A420u, 0xD00u, 0x0015B410u, JAKE_OUCH },    /* hurt */
+    { 0x38F00u, 0xC30u, 0x000A7EF0u, JAKE_YELL },    /* double jump */
+    { 0x39B40u, 0x8D0u, 0x000A8B30u, JAKE_YELL },    /* Stun Club swing */
+    { 0x38560u, 0x990u, 0x000A7550u, JAKE_SILENT },  /* Stun Club spin, catch */
+    { 0x36B30u, 0x1A20u, 0x000A5B20u, JAKE_SILENT }, /* "Gotcha!" */
+    { 0x3A420u, 0xD00u, 0x000A9410u, JAKE_OUCH },    /* hurt */
 };
 enum { JAKE_YELL_COUNT = sizeof(g_yells) / sizeof(g_yells[0]) };
 
@@ -1223,10 +1247,17 @@ static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
         cpu->gpr[7] = JAKE_CLUB_HALO_PURPLE;
 }
 
+static void jake_load_from_disc(void);
+
 static void jake_vblank(void) {
     static uint32_t ticks;
+    static uint8_t loaded;
     if (!g_enabled)
         return;
+    if (!loaded) {
+        loaded = 1u;
+        jake_load_from_disc();
+    }
     jake_purple_club();
     jake_purple_hoop();
     jake_purple_net_entry();
@@ -2439,17 +2470,21 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     ++g_frame;
 }
 
-static void jake_load_voice(void) {
+static void jake_load_voice(const JakeDiscFile* dat) {
     static uint8_t disc[JAKE_VOICE_SIZE];
     static int16_t ouch[JAKE_OUCH_SAMPLES];
     char path[1024];
     FILE* f;
-    if (!jake_disc_path(path, sizeof(path)) || !(f = fopen(path, "rb")))
-        return;
-    int y, ok = jake_read_disc(f, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) && disc[17] == 0x04u;
-    const int have_ouch = jake_load_ouch(f, ouch);
+    int have_ouch = 0;
+    int y, ok = jake_disc_piece(dat, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) && disc[17] == 0x04u;
+    /* The 'ouch' is XA audio (Form 2), which the runtime's file read refuses,
+     * so it is still read from the image named by disc.cfg. */
+    if (jake_disc_path(path, sizeof(path)) && (f = fopen(path, "rb"))) {
+        have_ouch = jake_load_ouch(f, ouch);
+        fclose(f);
+    }
     for (y = 0; ok && y < JAKE_YELL_COUNT; ++y)
-        ok = jake_read_disc(f, g_yells[y].disc, g_yells[y].head, sizeof(g_yells[y].head)) &&
+        ok = jake_disc_piece(dat, g_yells[y].disc, g_yells[y].head, sizeof(g_yells[y].head)) &&
              g_yells[y].head[17] == 0x04u;
     if (ok)
         jake_build_voice(disc, have_ouch ? ouch : NULL);
@@ -2457,15 +2492,23 @@ static void jake_load_voice(void) {
         fprintf(stderr, "play-as-jake: Jake's voice was not found on this disc\n");
     if (ok && !have_ouch)
         fprintf(stderr, "play-as-jake: Jake's 'ouch' was not found on this disc; hurt cry silenced\n");
-    fclose(f);
+}
+
+/* Disc data is read on the first frame, from the emulation thread (where the
+ * runtime's disc reads are allowed), rather than at activation. */
+static void jake_load_from_disc(void) {
+    JakeDiscFile dat = jake_disc_file(JAKE_DAT_FILE);
+    if (!dat.data)
+        fprintf(stderr, "play-as-jake: %s could not be read from the disc\n", JAKE_DAT_FILE);
+    jake_load_disc(&dat);
+    jake_load_voice(&dat);
+    free(dat.data);
 }
 
 static void jake_activate(void) {
     g_enabled = 1u;
     jake_find_cards();
     jake_save_looks_read();
-    jake_load_disc();
-    jake_load_voice();
 }
 
 PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
