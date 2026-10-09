@@ -285,45 +285,6 @@ static uint8_t g_have_tail;
 
 /* ---- Disc -------------------------------------------------------------- */
 
-/* The .bin next to the .cue named by disc.cfg (the runtime's own config).
- * Only the XA 'ouch' still uses this; everything else is read through
- * psx_mod_read_disc_file. */
-static int jake_disc_path(char* out, size_t size) {
-    char cue[1024], line[1024];
-    FILE* f = fopen("disc.cfg", "rb");
-    size_t n;
-    char* slash;
-    if (!f)
-        return 0;
-    n = fread(cue, 1, sizeof(cue) - 1, f);
-    fclose(f);
-    cue[n] = '\0';
-    while (n > 0 && (cue[n - 1] == '\r' || cue[n - 1] == '\n' || cue[n - 1] == ' '))
-        cue[--n] = '\0';
-    f = fopen(cue, "rb");
-    if (!f)
-        return 0;
-    out[0] = '\0';
-    while (fgets(line, sizeof(line), f)) {
-        char* q0 = strchr(line, '"');
-        char* q1 = q0 ? strchr(q0 + 1, '"') : NULL;
-        if (strncmp(line, "FILE", 4) != 0 || !q1)
-            continue;
-        *q1 = '\0';
-        slash = strrchr(cue, '\\');
-        if (!slash)
-            slash = strrchr(cue, '/');
-        if (slash)
-            snprintf(out, size, "%.*s%s", (int)(slash - cue + 1), cue, q0 + 1);
-        else
-            snprintf(out, size, "%s", q0 + 1);
-        break;
-    }
-    fclose(f);
-    return out[0] != '\0';
-}
-
-
 static void jake_unpack_face(const uint8_t* packed, uint32_t size, uint16_t* texels) {
     uint8_t pixels[JAKE_VRAM_W * 4 * JAKE_VRAM_H];
     uint32_t i = 0, n = 0, k;
@@ -447,6 +408,7 @@ static const uint32_t SPU_TRANSFER_ADDRESS = 0x1F801DA6u;
 static const uint32_t SPU_TRANSFER_FIFO = 0x1F801DA8u;
 
 static const uint32_t JAKE_OUCH_LBA = 143876u;
+static const char JAKE_OUCH_FILE[] = "DEMO/A_RAI_D2.STR";
 enum {
     JAKE_OUCH_SAMPLES = 18522,      /* at 37.8 kHz */
     JAKE_OUCH_WARMUP = 4,           /* channel sectors decoded first, to settle the filter */
@@ -638,16 +600,23 @@ static void jake_build_voice(const uint8_t* disc, const int16_t* ouch) {
  */
 static const int XA_FILTERS[4][2] = { { 0, 0 }, { 60, 0 }, { 115, -52 }, { 98, -55 } };
 
-static int jake_load_ouch(FILE* f, int16_t* ouch) {
+enum { JAKE_OUCH_SPAN = (JAKE_OUCH_WARMUP + JAKE_OUCH_SECTORS) * JAKE_OUCH_STRIDE };
+
+static int jake_load_ouch(int16_t* ouch) {
+    static uint8_t sectors[JAKE_OUCH_SPAN][2352];
+    const uint32_t first = JAKE_OUCH_LBA - JAKE_OUCH_WARMUP * JAKE_OUCH_STRIDE;
     int st[2][2] = { { 0, 0 }, { 0, 0 } };
-    uint8_t raw[2352];
-    uint32_t got = 0;
+    uint32_t got = 0, lba, size;
     int s;
+    /* The sectors sit inside the cutscene stream on this disc's layout. */
+    if (!psx_mod_disc_file_extent(JAKE_OUCH_FILE, &lba, &size) || first < lba ||
+        JAKE_OUCH_LBA + JAKE_OUCH_SECTORS * JAKE_OUCH_STRIDE > lba + (size + 2047u) / 2048u ||
+        !psx_mod_read_disc_raw_sectors(first, JAKE_OUCH_SPAN, sectors))
+        return 0;
     for (s = -JAKE_OUCH_WARMUP; s < JAKE_OUCH_SECTORS; ++s) {
-        const uint32_t lba = JAKE_OUCH_LBA + (uint32_t)(s * JAKE_OUCH_STRIDE);
+        const uint8_t* raw = sectors[(s + JAKE_OUCH_WARMUP) * JAKE_OUCH_STRIDE];
         int g, u, j;
-        if (fseek(f, (long)lba * 2352L, SEEK_SET) != 0 || fread(raw, 1, sizeof(raw), f) != sizeof(raw) ||
-            raw[16] != 1u || raw[17] != 1u || !(raw[18] & 0x04u) || raw[19] != 0x01u)
+        if (raw[16] != 1u || raw[17] != 1u || !(raw[18] & 0x04u) || raw[19] != 0x01u)
             return 0;
         for (g = 0; g < 18; ++g) {
             const uint8_t* grp = raw + 24 + g * 128;
@@ -2473,16 +2442,9 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
 static void jake_load_voice(const JakeDiscFile* dat) {
     static uint8_t disc[JAKE_VOICE_SIZE];
     static int16_t ouch[JAKE_OUCH_SAMPLES];
-    char path[1024];
-    FILE* f;
-    int have_ouch = 0;
+    /* The 'ouch' is XA audio (Form 2): raw sectors, not a file read. */
+    const int have_ouch = jake_load_ouch(ouch);
     int y, ok = jake_disc_piece(dat, JAKE_DISC_VOICE, disc, JAKE_VOICE_SIZE) && disc[17] == 0x04u;
-    /* The 'ouch' is XA audio (Form 2), which the runtime's file read refuses,
-     * so it is still read from the image named by disc.cfg. */
-    if (jake_disc_path(path, sizeof(path)) && (f = fopen(path, "rb"))) {
-        have_ouch = jake_load_ouch(f, ouch);
-        fclose(f);
-    }
     for (y = 0; ok && y < JAKE_YELL_COUNT; ++y)
         ok = jake_disc_piece(dat, g_yells[y].disc, g_yells[y].head, sizeof(g_yells[y].head)) &&
              g_yells[y].head[17] == 0x04u;

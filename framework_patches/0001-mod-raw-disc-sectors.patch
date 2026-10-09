@@ -1,0 +1,49 @@
+diff --git a/runtime/include/mod_plugins.h b/runtime/include/mod_plugins.h
+index 353d298b..8582bb2e 100644
+--- a/runtime/include/mod_plugins.h
++++ b/runtime/include/mod_plugins.h
+@@ -113,6 +113,11 @@ int psx_mod_read_disc_file(const char* path, void* buffer, uint32_t capacity,
+ /* Effective-disc LBA and byte size of a file (directory records patched by
+  * active mods apply, so a relocated file reports its new extent). */
+ int psx_mod_disc_file_extent(const char* path, uint32_t* lba, uint32_t* size);
++/* `count` consecutive raw 2352-byte sectors (sync/header/subheader included,
++ * Form 2 XA sectors too) of the mounted disc into `buffer` (count * 2352
++ * bytes). Active sector mods apply. Fails on images without raw sectors. */
++#define PSX_MOD_HAS_READ_DISC_RAW_SECTORS 1
++int psx_mod_read_disc_raw_sectors(uint32_t lba, uint32_t count, void* buffer);
+ /* Experimental retained-texture service (currently OpenGL only). IDs are
+  * nonzero, stable game-owned identities, NOT GL names. Banks are immutable
+  * 16-bit PS1 texels/indices with a caller-selected row pitch (width).
+diff --git a/runtime/src/mod_runtime.cpp b/runtime/src/mod_runtime.cpp
+index d96bdf5f..2e4aa34a 100644
+--- a/runtime/src/mod_runtime.cpp
++++ b/runtime/src/mod_runtime.cpp
+@@ -2582,6 +2582,28 @@ extern "C" int psx_mod_disc_file_extent(const char* path, uint32_t* lba,
+     } catch (...) { return 0; }
+ }
+ 
++/* Consecutive raw 2352-byte sectors of the effective disc, Form 2 (XA)
++ * included, for mods that decode XA audio themselves. Committed sector mods
++ * apply. Images without raw sectors (.iso) fail. */
++extern "C" int psx_mod_read_disc_raw_sectors(uint32_t lba, uint32_t count,
++                                             void* buffer) {
++    using namespace PSXRecompV4;
++    if (!buffer || !count || count > 360000u || lba > 360000u - count) return 0;
++    try {
++        const auto& s = state();
++        const auto& mount = s.effective_disc_path.empty() ? s.disc_path : s.effective_disc_path;
++        if (mount.empty()) return 0;
++        PS1::ISOReader reader;
++        if (!reader.Open(mount.string())) return 0;
++        auto* out = static_cast<uint8_t*>(buffer);
++        for (uint32_t i = 0; i < count; ++i, out += 2352) {
++            if (!reader.ReadRawSector(lba + i, out)) return 0;
++            patch_committed_disc_sector(lba + i, 1, out, 2352);
++        }
++        return !s.disc_guard_failed;
++    } catch (...) { return 0; }
++}
++
+ namespace PSXRecompV4 {
+ /* Whole effective sectors, including the bytes after end-of-file in the last
+  * sector: a sector-granular read by the game receives exactly these. */

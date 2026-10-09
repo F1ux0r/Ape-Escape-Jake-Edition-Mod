@@ -8,6 +8,31 @@ set(CMAKE_CXX_STANDARD 17)
 set(PSXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp-v4" CACHE PATH
     "Path to psxrecomp")
 
+# Framework additions the mods need that upstream psxrecomp doesn't have yet
+# (framework_patches/README.md). Applied once to the framework checkout; a
+# patch that no longer applies stops the configure instead of building a mod
+# that silently loses a feature.
+find_package(Git REQUIRED)
+file(GLOB FRAMEWORK_PATCHES "${CMAKE_CURRENT_SOURCE_DIR}/framework_patches/*.patch")
+list(SORT FRAMEWORK_PATCHES)
+foreach(patch IN LISTS FRAMEWORK_PATCHES)
+    get_filename_component(patch_name "${patch}" NAME)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${patch}"
+                    WORKING_DIRECTORY "${PSXRECOMP_ROOT}"
+                    RESULT_VARIABLE already OUTPUT_QUIET ERROR_QUIET)
+    if(NOT already EQUAL 0)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" apply "${patch}"
+                        WORKING_DIRECTORY "${PSXRECOMP_ROOT}"
+                        RESULT_VARIABLE failed ERROR_VARIABLE why)
+        if(NOT failed EQUAL 0)
+            message(FATAL_ERROR "Framework patch ${patch_name} does not apply to "
+                                "${PSXRECOMP_ROOT}:\n${why}")
+        endif()
+        message(STATUS "Applied framework patch ${patch_name}")
+    endif()
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${FRAMEWORK_PATCHES})
+
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 # Current psxrecomp emits the large game translation unit as numbered shards
