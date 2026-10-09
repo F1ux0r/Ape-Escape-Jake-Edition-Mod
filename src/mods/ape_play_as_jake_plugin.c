@@ -88,9 +88,13 @@ enum {
  *  - pause menu lives shirt (page 0x4F): red -> his navy.
  *  - race map heads (page 0x26, palette 0x3F9B; Spike at uv F860, Jake at
  *    F868): swapped like the bodies, Jake's blue hair made purple.
+ *  - health flame behind the cookies (page 0x1A, palette 0x7A2B): its
+ *    yellow-to-red becomes turquoise-to-purple, shade for shade (same
+ *    brightness steps, same semi-transparency bits). Matched at any uv.
  * The palettes the game loaded are left alone, so nothing else that shares
  * them changes.
  */
+enum { JAKE_ANY_UV = 0xFFFFu };     /* match any uv and keep it */
 typedef struct JakeHudIcon {
     uint16_t tpage, uv, stock_clut, new_uv, clut_x, clut_y;
     uint16_t palette[16];
@@ -106,6 +110,9 @@ static const JakeHudIcon JAKE_HUD_ICONS[] = {
       0x0000, 0x9CA4, 0xD8CD, 0xE931, 0x8C73, 0x801A, 0x801F, 0x931C,
       0x9BFF, 0x9D92, 0xA218, 0xBEBB, 0xCF3F, 0xBC68, 0xFA15, 0xFFDE } },
     { 0x26u, 0xF868u, 0x3F9Bu, 0xF860u, 0u, 0u, { 0 } },
+    { 0x1Au, JAKE_ANY_UV, 0x7A2Bu, JAKE_ANY_UV, 992u, 254u, {
+      0x0000, 0xA867, 0x544E, 0x6030, 0x6C32, 0x78B4, 0x7D53, 0x7DD0,
+      0x7E2D, 0x7E89, 0x7AE4, 0x7723, 0x6F64, 0x73CE, 0x77F3, 0x7BF9 } },
 };
 enum { JAKE_HUD_ICON_COUNT = sizeof(JAKE_HUD_ICONS) / sizeof(JAKE_HUD_ICONS[0]) };
 
@@ -1973,12 +1980,14 @@ static void jake_recolour_hud(uint32_t table) {
             uv_word = psx_mod_read_word(addr + 4u + (k + 2u) * 4u);
             for (i = 0; i < JAKE_HUD_ICON_COUNT; ++i) {
                 const JakeHudIcon* icon = &JAKE_HUD_ICONS[i];
-                if ((page & 0x1FFu) == icon->tpage && (uv_word & 0xFFFFu) == icon->uv &&
+                if ((page & 0x1FFu) == icon->tpage &&
+                    (icon->uv == JAKE_ANY_UV || (uv_word & 0xFFFFu) == icon->uv) &&
                     (uv_word >> 16) == icon->stock_clut) {
                     const uint32_t clut = icon->clut_x != 0u
                         ? ((uint32_t)icon->clut_y << 6) | (icon->clut_x >> 4u)
                         : icon->stock_clut;
-                    psx_mod_write_word(addr + 4u + (k + 2u) * 4u, (clut << 16) | icon->new_uv);
+                    const uint32_t uv = icon->new_uv == JAKE_ANY_UV ? (uv_word & 0xFFFFu) : icon->new_uv;
+                    psx_mod_write_word(addr + 4u + (k + 2u) * 4u, (clut << 16) | uv);
                     break;   /* the swapped uv must not match the other entry */
                 }
             }
