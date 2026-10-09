@@ -27,7 +27,8 @@ strict = true
 # 0x8009AD60 = Slingback Shooter handler (draws it through 0x800E9E40).
 # 0x8002020C = glow beam (a0/a1 ends, a3 colour); the club's light halo.
 # 0x80028CC0 = DrawOTag (a0 = last ordering-table entry); grabber is linked in here.
-mod_function_entry_funcs = ["0x80016A60", "0x80028CC0", "0x8002020C", "0x8001F954"]
+mod_function_entry_funcs = ["0x80016A60", "0x80028CC0", "0x8002020C", "0x8001F954", "0x8005DEE0"]
+mod_instruction_sites = ["0x8005C078"]
 
 [runtime]
 debug_port = 4480
@@ -41,6 +42,17 @@ memcard_dir = "saves"
 # jump straight into the game). LLE stays linked as the fallback/oracle for any
 # service the HLE tier doesn't implement. Env PSX_BIOS_HLE overrides at launch.
 bios_hle = true
+
+[timing]
+# Crowded scenes miss their 30 FPS deadline with faithful instruction charging.
+# A scale of 2 is the smallest supported adjustment and keeps VBlank, timers,
+# CD, SPU and DMA on the original hardware clock.
+guest_cycle_scale = 2
+# Only during in-level play. Phase byte 0x800F447C: 0 title/attract, 7 stage
+# select + Professor briefing, 1 load, 24 level flyover, 25 warp-in, 3 play,
+# 4/5 at an area doorway. Menus and cutscenes paced by work-per-frame flip at
+# 60 Hz when overclocked, so everything but 3 stays faithful.
+guest_cycle_scale_gate = { addr = 0x800F447C, size = 1, value = 3 }
 
 [video]
 # Auto-skip FMVs: when a streaming movie (XA audio + MDEC) is detected, run it
@@ -59,14 +71,18 @@ offer_frame_interpolation = false
 # GL compositor perf fix). The launcher's Renderer setting still offers Software.
 renderer = "opengl"
 
-# Ship 2x SSAA with present antialiasing enabled. Aligned RTX/OpenGL testing
-# found 2x and 4x stayed within the 59.94 Hz budget in the sampled attract
-# scene, but that is not yet a full-playthrough guarantee. 3x/4x SSAA and
-# bilinear texture filtering (which changes the authored PSX texture look)
-# remain opt-in.
-supersampling = 2
+# Settings > Display exposes Native, 720p, 1080p, 1440p, 4K, 5K, 8K and
+# Match display. Start with the same 4K preset as Spider-Man; players can
+# lower it to leave more rendering time for intermediate frames.
+internal_resolution = "4k"
 antialiasing = true
-texture_filtering = "nearest"
+texture_filtering = "bilinear"
+fmv_filter = "bicubic"
+# The bundled PGXP mod owns both correction toggles, including its Off state.
+geometry_correction = false
+perspective_texturing = false
+pgxp_cpu_mode = true
+pgxp_tolerance = 1.0
 
 # Authentic 4:3 is the baseline. Ape Escape's game-specific widescreen modes
 # are selected from the built-in Mods catalog rather than generic Video settings.

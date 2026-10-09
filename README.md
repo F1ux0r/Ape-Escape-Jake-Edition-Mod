@@ -30,7 +30,9 @@ build glue for running Ape Escape on the PSXRecomp framework. The game's MIPS
 code is machine-translated ("recompiled") ahead of time into native C, then
 compiled into a real Windows program that runs the game's own logic on a
 faithful simulation of the PS1 hardware (GPU, SPU, GTE, memory cards) plus the
-real, recompiled PS1 BIOS — no high-level emulation shims.
+real, recompiled PS1 BIOS. Since v0.5.1 the framework's title timing scale
+keeps crowded areas at their original 30 FPS cadence while hardware-timed
+devices remain on the PlayStation clock; v0.5.2 applies it only during play.
 
 It does **not** contain the Ape Escape disc image, a retail PS1 BIOS, generated
 game code, or any decompiled game C. Release builds include the MIT-licensed
@@ -50,7 +52,7 @@ Important files:
 
 ## Status
 
-**Playable preview — `v0.3.0`.** Ape Escape **boots from the PS1 BIOS and
+**Current release — `v0.5.2`.** Ape Escape **boots from the PS1 BIOS and
 plays** — through the intro, the title, and into gameplay, with dual-analog
 controller input including **L3/R3 stick clicks** (added in v0.0.3), a
 **controls fix** so the analog stick no longer spins the camera (v0.0.5),
@@ -67,7 +69,7 @@ so treat it as a very playable preview rather than a certified full playthrough.
 | FMV / audio | ✅ MDEC video + XA/SPU audio (auto-skip FMV optional) |
 | Mods | ✅ Built-in catalog with Ape-specific and framework-owned enhancements |
 | Widescreen 16:9 / 21:9 / Adaptive | ✅ Opt-in 16:9, 21:9, and live-window adaptive modes |
-| Temporal frame blending | ✅ Opt-in display / 120 / 144 / 165 presents-per-second modes |
+| Interpolated rendering | ✅ Opt-in display / 60 / 90 / 120 / 144 / 165 / 240 FPS |
 | Full playthrough | ⚠️ Not yet verified end-to-end |
 
 ### Built-in mods
@@ -77,12 +79,12 @@ The launcher's **Mods** page includes four Ape-specific bundled enhancements:
 - **Ape Escape Widescreen** moves the existing game-specific enhancement out
   of generic Video settings. Its picker offers **16:9**, **21:9**, and
   **Adaptive** (live window aspect from 4:3 through 21:9).
-- **Ape Escape Frame Smoothing** crossfades completed game frames at the
-  display refresh or a fixed **120**, **144**, or **165 presents/s**. It leaves
-  the executable, simulation, timers, and audio at stock cadence. This is
-  temporal blending, not motion-vector frame generation, so it cannot create
-  true in-between object positions. All OpenGL presentation remains on the
-  renderer's original thread and context.
+- **Ape Escape Frame Interpolation** redraws intermediate camera and model
+  transforms using the game drawing code. Display refresh and fixed output
+  rates leave simulation, timers, audio and input at their stock cadence.
+  Existing Frame Smoothing selections use interpolation automatically.
+- **PGXP** adds subpixel geometry and perspective-correct textures. Internal
+  resolution, texture filtering and FMV filtering remain configurable in Settings.
 - **Skip FMVs** ends movies through the game's normal completion path.
 - **Quick Gadget Select**, contributed by mthsk, recreates the later Ape
   Escape quick gadget switching flow for the face-button gadget menu.
@@ -150,3 +152,20 @@ build of the game's code.
 <p align="center">
   <a href="https://discord.gg/Ad9BwSzctP"><img src=".github/raid-discord.png" alt="Join the Retro AI Development (R.A.I.D.) Discord" width="200"></a>
 </p>
+
+## v0.4.0 rendering update
+
+Game-code interpolation replaces Frame Smoothing while retaining saved rate selections. Adds internal-resolution presets, PGXP geometry/perspective correction and filtering options. Fixes the GPU foreground classification behind flickering black wall polygons. The memory-card menu uses its native layout in widescreen. Late beach-ball appearance remains under investigation.
+
+## v0.5.1 crowded-scene timing fix
+
+Ape Escape uses the smallest guest-cycle adjustment that removed the measured
+30 FPS misses in seven affected areas. VBlank, timers, CD, SPU, and DMA retain
+their original cadence. Windows and Linux now ship from the same published
+source build. See [release notes](RELEASE_NOTES.md) for the A/B measurements,
+save/load checks, and coverage limits.
+
+## v0.5.2 gameplay-only timing scale
+
+The v0.5.1 timing scale now applies only while a level is being played. Menus,
+the stage-select briefing and level intros run at their original pacing again.

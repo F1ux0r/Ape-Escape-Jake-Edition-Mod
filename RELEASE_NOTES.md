@@ -1,3 +1,115 @@
+# v0.5.2
+
+v0.5.1's crowded-scene fix sped up all game code, which also made menus and
+cutscenes that pace themselves by their own workload flip frames too early.
+v0.5.2 applies the guest-cycle scale only during in-level play, using the
+game's own screen-phase byte; everything else runs on the original timing.
+
+Real-time A/B on the same build and route:
+
+- Title / startup menu: frame timing identical to the unscaled game
+  (v0.5.1 differed).
+- Stage-select Professor briefing: 63 single-VBlank frame flips, against 64
+  unscaled and 417 in v0.5.1.
+- Dexter's Island while moving: no slowdown frames, as in v0.5.1 (16 unscaled).
+
+Level intro flyovers and warp-ins also run unscaled. Not yet verified: the
+stage-clear results screen and in-level boss cutscenes.
+
+---
+
+# v0.5.1
+
+This release fixes the remaining crowded-scene slowdown with the shared guest
+cycle scaling added to PSXRecomp. Ape Escape now charges recompiled CPU work at
+half the previous guest-cycle rate while VBlank, timers, CD, SPU, and DMA stay
+on the original PlayStation clock.
+
+- Crabby Beach improved from 29.06 FPS with 18 delayed frames in 8.05 seconds
+  to 30.06 FPS with every measured game frame taking exactly two VBlanks.
+- Fourteen idle and movement samples across Dexter's Island, Primordial Ooze,
+  Crabby Beach, Molten Lava, Sushi Temple, Frosty Retreat, and Thick Jungle held
+  29.92-30.16 FPS and 59.60-60.08 guest VBlanks per second without delayed or
+  one-VBlank gameplay frames.
+- Current-format save-state save/load, four world-selector area transitions,
+  populated memory-card reads, and active audio passed without softlocks,
+  memory-card aborts, audio underruns, or audio overflow drops.
+- Scale 2 is the smallest supported adjustment that fixes the measured misses;
+  settled gameplay remains capped at the original 30 FPS cadence.
+- Windows and Linux are now built from the same published source and framework
+  commit. The v0.5.0 Windows-only external renderer executable is no longer a
+  release input.
+
+These measurements cover saved checkpoints and selected transitions rather
+than a complete playthrough. The separate Fast Loading transition-noise and
+Crumbling Castle investigation remains open.
+
+---
+
+# v0.5.0
+
+Renderer HLE is enabled in the Windows build to reduce slowdown in busy areas.
+It replaces an expensive rendering routine with native work while preserving
+its caller-visible results. The implementation is selected when building;
+there is no player setting to enable it.
+
+- Retains v0.4.0's interpolation, internal-resolution presets, PGXP, filtering,
+  and widescreen fixes.
+- Prevents false spin-freeze diagnostics while the game is still submitting
+  new drawing commands.
+- The HLE prototype held approximately 30 FPS at sampled checkpoints in
+  Crabby Beach, Primordial Ooze, Molten Lava, Sushi Temple, Frosty Retreat,
+  Dexter's Island, and Thick Jungle. Dexter improved from approximately
+  27-28 FPS to 30 FPS in the measured cases. These were short checkpoint
+  samples, not complete level playthroughs.
+- The updated renderer passed 256 ABI boundary comparisons. Production
+  cold-boot smoke checks confirmed HLE activation with optional interpolation
+  and widescreen selected. Those checks do not establish full gameplay
+  compatibility for every enhancement combination.
+
+Please playtest the affected levels and report the exact location, selected
+mods, and hardware for any remaining slowdown, rendering errors, or crashes.
+Full-game completion and the absence of every possible slowdown are not
+claimed. Cold-boot checks also recorded startup pacing/audio stalls whose
+cause has not been isolated; this release does not resolve every source of
+slowdown. Memory-card saves remain the way to transfer progress across older
+builds whose save-state format is rejected.
+
+The release contains one Windows x64 HLE package and its SHA-256 checksum.
+Game-specific HLE build inputs remain outside this source repository; the
+validated executable identity is recorded in packaging/release/runtime.json.
+
+---
+
+# v0.4.0
+
+Game-code interpolation replaces Frame Smoothing while retaining saved rate selections. Adds internal-resolution presets, PGXP geometry/perspective correction and filtering options. Fixes the GPU foreground classification behind flickering black wall polygons. The memory-card menu uses its native layout in widescreen. Late beach-ball appearance remains under investigation.
+
+Enable the frame-rate and widescreen enhancements in Mods. Native game timing remains unchanged. These are playable preview builds; full-game completion is not recertified.
+
+---
+
+# Ape Escape Recompiled - v0.3.1
+
+- Fixes the gameplay slowdown in Primordial Ooze reported in #18. The
+  original-disc AOT scanner now recognizes functions with instructions before
+  stack setup and delayed return-address saves, so these level functions ship
+  as native code.
+- Rebuilds and audits the original-disc overlay caches for Windows and Linux.
+  This fixes the confirmed coverage gap; complete static coverage and a full
+  playthrough are not claimed.
+- Refreshes bundled Linux cache files when upgrading, so existing installations
+  receive the corrected level code while retaining saves and settings.
+
+---
+
+# Ape Escape Recompiled - v0.3.0
+
+- Ships precompiled code for 47 original-disc archive overlays and two minigame
+  executables, with a verified source inventory and cache audit on both platforms.
+
+---
+
 # Ape Escape Recompiled - v0.2.1
 
 - Replaces the removed Frame Rate package with default-off **Ape Escape Frame

@@ -5,6 +5,12 @@ executables. This establishes broad image coverage without requiring a full
 decompilation. It does not establish complete static execution coverage.
 Interpreter and runtime compilation fallback remain enabled.
 
+Version 0.3.1 fixes two discovery gaps exposed by Primordial Ooze: scheduled
+instructions before stack allocation and a return-address save after a long
+straight-line prefix. The shared scanner now recovers these original-disc
+functions automatically. No runtime captures or per-address seed overrides are
+needed to build the release cache.
+
 The consumer profile is [aot/overlays.json](../aot/overlays.json). Extraction,
 compilation, auditing, and staging belong to the shared
 [psxrecomp AOT pipeline](../psxrecomp-v4/docs/AOT_SHARDING.md), including the

@@ -5,8 +5,11 @@ param(
     [string]$Version = "",
     [string]$BuildDir = "build-release",
     [string]$RecompilerBuildDir = "recompiler/build",
-    [int]$Jobs = 8,
+    [int]$Jobs = 2,
     [switch]$SkipRegen,
+    # Releases with an external runtime manifest require the exact validated
+    # executable. Game-specific HLE inputs are maintained outside this repo.
+    [string]$PrebuiltExecutable = "",
     # Framework and launcher checkouts to build and stage from. Empty means the
     # in-repo psxrecomp-v4 / recomp-ui submodules (normally directory junctions
     # to the shared checkouts). Override either one to validate a release
@@ -35,6 +38,24 @@ if (-not $Version) {
     }
     $Version = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
     if (-not $Version) { throw "$VersionFile is empty" }
+}
+$RuntimeManifestPath = Join-Path $PackagingRelease 'runtime.json'
+if (Test-Path -LiteralPath $RuntimeManifestPath) {
+    $RuntimeManifest = Get-Content -LiteralPath $RuntimeManifestPath -Raw | ConvertFrom-Json
+    if ($RuntimeManifest.version -ne $Version) {
+        throw "Release version differs from packaging/release/runtime.json"
+    }
+    if ($RuntimeManifest.external_hle_inputs) {
+        if (-not $PrebuiltExecutable) {
+            throw "This HLE release requires -PrebuiltExecutable from the validated external build. See packaging/release/runtime.json."
+        }
+        $PrebuiltExecutable = (Resolve-Path -LiteralPath $PrebuiltExecutable).Path
+        if ((Get-FileHash -LiteralPath $PrebuiltExecutable -Algorithm SHA256).Hash -ne $RuntimeManifest.exe_sha256) {
+            throw "Prebuilt executable does not match the validated release SHA-256"
+        }
+    } elseif ($PrebuiltExecutable) {
+        throw "This source-built release does not accept -PrebuiltExecutable"
+    }
 }
 if ($FrameworkDir) {
     $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkDir).Path
@@ -147,9 +168,11 @@ if (-not $SkipRegen) {
 # load-bearing: derive the tag before this and it is computed from a header that
 # does not exist yet or is stale, and every shard is filed under a namespace the
 # shipped runtime does not scan.
-Invoke-Native { & $CMake -S $Root -B $BuildPath -G Ninja -DCMAKE_BUILD_TYPE=Release -DPSX_DEBUG_TOOLS=OFF -DPSX_PGXP_VARIANT=OFF -DPSX_SDL_BACKEND=SDL3 "-DPSX_GAME_VERSION=$Version" `
-    "-DPSXRECOMP_ROOT=$FrameworkRoot" "-DRECOMP_UI_ROOT=$RecompUiRoot" } "cmake configure"
-Invoke-Native { & $CMake --build $BuildPath --target psx-runtime -j $Jobs } "cmake build"
+if (-not $PrebuiltExecutable) {
+    Invoke-Native { & $CMake -S $Root -B $BuildPath -G Ninja -DCMAKE_BUILD_TYPE=Release -DPSX_DEBUG_TOOLS=OFF -DPSX_PGXP_VARIANT=OFF -DPSX_SDL_BACKEND=SDL3 "-DPSX_GAME_VERSION=$Version" `
+        "-DPSXRECOMP_ROOT=$FrameworkRoot" "-DRECOMP_UI_ROOT=$RecompUiRoot" } "cmake configure"
+    Invoke-Native { & $CMake --build $BuildPath --target psx-runtime -j $Jobs } "cmake build"
+}
 
 if (Test-Path $StageRoot) {
     $resolvedRoot = (Resolve-Path $Root).Path.TrimEnd('\')
@@ -165,9 +188,15 @@ New-Item -ItemType Directory -Force (Join-Path $Stage "saves") | Out-Null
 # The runtime target's OUTPUT_NAME is derived from window_title -> the built exe
 # is ApeEscapeRecomp.exe, NOT psx-runtime.exe. Prefer that (fall back to the
 # generic name for older builds). Copying psx-runtime.exe shipped a STALE binary.
-$DevExe = Join-Path $BuildPath "ApeEscapeRecomp.exe"
-if (-not (Test-Path $DevExe)) { $DevExe = Join-Path $BuildPath "psx-runtime.exe" }
+$DevExe = $PrebuiltExecutable
+if (-not $DevExe) {
+    $DevExe = Join-Path $BuildPath "ApeEscapeRecomp.exe"
+    if (-not (Test-Path $DevExe)) { $DevExe = Join-Path $BuildPath "psx-runtime.exe" }
+}
 Copy-Item $DevExe (Join-Path $Stage "ApeEscapeRecomp.exe")
+if (Test-Path -LiteralPath $RuntimeManifestPath) {
+    Copy-Item -LiteralPath $RuntimeManifestPath -Destination (Join-Path $Stage 'RUNTIME_BUILD.json')
+}
 if (Test-Path (Join-Path $Root "README.md"))         { Copy-Item (Join-Path $Root "README.md") $Stage }
 if (Test-Path (Join-Path $Root "LICENSE"))           { Copy-Item (Join-Path $Root "LICENSE") $Stage }
 New-Item -ItemType Directory -Force (Join-Path $Stage 'docs') | Out-Null
@@ -256,7 +285,7 @@ Invoke-Native {
         --game-toml (Join-Path $Root 'game.toml') --runtime-config $StagedGameToml `
         --runtime-build-dir $BuildPath --runtime-target psx-runtime `
         --recompiler $RecompBin --work-dir (Join-Path $Root 'build-aot') `
-        --stage $Stage --gcc (Join-Path $MingwBin 'gcc.exe') --workers 3
+        --stage $Stage --gcc (Join-Path $MingwBin 'gcc.exe') --workers $Jobs
 } 'original-disc AOT extraction, compilation and audit'
 Add-OverlayToolchain -Stage $Stage -RecompDir $RecompDir -RecompTools $RecompTools `
                      -RecompInc $RecompInc -MingwBin $MingwBin `
@@ -319,6 +348,24 @@ Memory cards, save states, and rewind data are stored in the saves directory.
 "@ | Set-Content -Encoding ASCII (Join-Path $Stage "START_HERE.txt")
 
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
+# Keep framework/UI notices and source pins with the playable package.
+$Licenses = Join-Path $Stage 'licenses'
+New-Item -ItemType Directory -Path $Licenses -Force | Out-Null
+Copy-Item -Path (Join-Path $FrameworkRoot 'runtime/licenses/*') -Destination $Licenses -Force
+foreach ($notice in @('LICENSE', 'THIRD_PARTY_ATTRIBUTION.md')) {
+    $source = Join-Path $FrameworkRoot $notice
+    if (Test-Path -LiteralPath $source) {
+        Copy-Item -LiteralPath $source -Destination (Join-Path $Licenses "psxrecomp-$notice") -Force
+    }
+}
+$UiLicense = Join-Path $Root 'recomp-ui/LICENSE'
+if (Test-Path -LiteralPath $UiLicense) {
+    Copy-Item -LiteralPath $UiLicense -Destination (Join-Path $Licenses 'recomp-ui-LICENSE') -Force
+}
+foreach ($doc in @('VERSION','RELEASE_NOTES.md','framework_pins.txt','BUILD_PROVENANCE.json')) {
+    $source = Join-Path $Root $doc
+    if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $Stage -Force }
+}
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -Force
 
 Write-Host "Wrote $ZipPath"

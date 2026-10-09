@@ -52,14 +52,18 @@ if [ -d "$payload/mods" ]; then
     chmod -R u+rwX "$data_dir/mods"
 fi
 
-# The bundled overlay cache is a head start, but the cache is also written by
-# the running game as it discovers new code. Seed without clobbering: the
-# release's shards fill in what is missing, and anything the player has already
-# built stays. -n is essential here; -a alone would overwrite user shards on
-# every launch.
+# Refresh bundled shards when the release changes: discovery fixes can add
+# native functions without changing the original bytes or cache filename.
+# On subsequent launches, preserve runtime additions to those shards. Files
+# outside the bundled inventory survive both paths.
 if [ -d "$payload/cache" ]; then
     mkdir -p "$data_dir/cache"
-    cp -a -n "$payload/cache/." "$data_dir/cache/" 2>/dev/null || true
+    previous_version=$(cat "$data_dir/.appimage-layout-version" 2>/dev/null || true)
+    if [ "$previous_version" != "@VERSION@" ]; then
+        cp -a "$payload/cache/." "$data_dir/cache/"
+    else
+        cp -a -n "$payload/cache/." "$data_dir/cache/"
+    fi
     chmod -R u+rwX "$data_dir/cache"
 fi
 
@@ -70,7 +74,7 @@ if [ -d "$payload/overlay_toolchain" ]; then
         ln -sfn "$payload/overlay_toolchain" "$data_dir/overlay_toolchain"
     fi
 fi
-for file in game.toml LICENSE README.md RELEASE.txt START_HERE.txt AOT_CACHE_AUDIT.json; do
+for file in game.toml LICENSE README.md RELEASE.txt START_HERE.txt AOT_CACHE_AUDIT.json VERSION RELEASE_NOTES.md framework_pins.txt BUILD_PROVENANCE.json; do
     if [ -f "$payload/$file" ]; then
         cp -f "$payload/$file" "$data_dir/$file"
         chmod u+rw "$data_dir/$file"

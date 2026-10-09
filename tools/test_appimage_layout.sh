@@ -91,8 +91,7 @@ fi
 env "${ENV_PREFIX}_DATA_DIR=$work/data" "${ENV_PREFIX}_SEED_ONLY=1" \
     "$appimage" --appimage-extract-and-run >/dev/null
 
-# A shard the player's own session built must survive a reseed: AppRun seeds
-# the cache with cp -n, so release shards fill gaps without overwriting.
+# A shard the player's own session built must survive a reseed.
 user_shard=$data_dir/cache/.user-shard-probe
 printf 'player-built\n' > "$user_shard"
 env "${ENV_PREFIX}_DATA_DIR=$work/data" "${ENV_PREFIX}_SEED_ONLY=1" \
@@ -111,6 +110,35 @@ after=$(sha256sum "$data_dir/input.ini" | awk '{print $1}')
 if [ "$before" != "$after" ]; then
     echo "reseed clobbered user-owned input.ini" >&2
     fail=1
+fi
+
+# Updates must replace an older bundled shard with the same filename, while
+# ordinary launches preserve additions made by the running game. Exercise the
+# actual AppImage upgrade path, including preservation of unrelated user data.
+if [ "$seeded_so" -gt 0 ]; then
+    bundled_shard=$(find "$data_dir/cache" -name '*.so' -print -quit)
+    bundled_hash=$(sha256sum "$bundled_shard" | awk '{print $1}')
+    printf 'runtime-extended\n' > "$bundled_shard"
+    env "${ENV_PREFIX}_DATA_DIR=$work/data" "${ENV_PREFIX}_SEED_ONLY=1" \
+        "$appimage" --appimage-extract-and-run >/dev/null
+    if [ "$(cat "$bundled_shard")" != "runtime-extended" ]; then
+        echo "same-version reseed clobbered a runtime-extended shard" >&2
+        fail=1
+    fi
+    printf 'v0.0.0\n' > "$data_dir/.appimage-layout-version"
+    printf 'player-save\n' > "$data_dir/saves/.user-save-probe"
+    env "${ENV_PREFIX}_DATA_DIR=$work/data" "${ENV_PREFIX}_SEED_ONLY=1" \
+        "$appimage" --appimage-extract-and-run >/dev/null
+    if [ "$(sha256sum "$bundled_shard" | awk '{print $1}')" != "$bundled_hash" ]; then
+        echo "upgrade retained an obsolete bundled shard" >&2
+        fail=1
+    fi
+    if [ "$(cat "$user_shard")" != "player-built" ] || \
+       [ "$(cat "$data_dir/saves/.user-save-probe")" != "player-save" ] || \
+       [ "$(sha256sum "$data_dir/input.ini" | awk '{print $1}')" != "$before" ]; then
+        echo "upgrade changed user-owned cache, save, or settings" >&2
+        fail=1
+    fi
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -24,7 +24,8 @@ set(GAME_GENERATED_DISPATCH
     "${CMAKE_CURRENT_SOURCE_DIR}/generated/SCUS_944.23_dispatch.c")
 
 file(GLOB APE_MOD_PLUGIN_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/mods/*.c")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mods/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mods/*.cpp")
 
 # Ape Escape's trusted, game-owned mod catalog. Every feature stays disabled
 # until selected on the launcher's Mods page.
@@ -43,6 +44,7 @@ file(GLOB APE_MOD_PLUGIN_SOURCES CONFIGURE_DEPENDS
 set(APE_PRELOADED_MODS "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded")
 
 psxrecomp_add_runtime_target(psx-runtime
+    PGXP
     GAME_GENERATED_FULL_C "${GAME_GENERATED_FULL}"
     GAME_GENERATED_DISPATCH_C "${GAME_GENERATED_DISPATCH}"
     EXTRAS_SOURCES ${APE_MOD_PLUGIN_SOURCES}
@@ -54,6 +56,7 @@ psxrecomp_add_runtime_target(psx-runtime
     # relative to the exe — and which now also accepts the region-qualified
     # "US-PSX-SCPH1001.BIN" spelling (recompiler/include/bios_rom_alias.h).
     DEFAULT_GAME_CONFIG_PATH "game.toml"
+    PRELOADED_MODS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded"
     LAUNCHER_BOXART "${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga"
     # Per-game executable name so each title's process is distinct (killing/
     # launching one title by name never hits another's running instance).
@@ -79,7 +82,6 @@ if(BUILD_TESTING)
 
     add_executable(ape_preloaded_mods_test
         tests/test_preloaded_mods.cpp
-        src/mods/ape_frame_smoothing_plugin.c
         "${PSXRECOMP_ROOT}/runtime/src/mod_packages.cpp"
         "${PSXRECOMP_ROOT}/runtime/src/crc32.c"
         "${PSXRECOMP_ROOT}/runtime/src/psx_sha256.c"
@@ -91,7 +93,7 @@ if(BUILD_TESTING)
     add_test(
         NAME ape_preloaded_mods_test
         COMMAND "$<TARGET_FILE:ape_preloaded_mods_test>"
-                "${APE_PRELOADED_MODS}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded"
     )
 
     # Release overlay staging: the shard cache and the overlay toolchain.
