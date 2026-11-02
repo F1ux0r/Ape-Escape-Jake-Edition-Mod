@@ -1,171 +1,118 @@
-# ApeEscapeRecomp
+<div align="center">
 
-> _This recompilation is a **byproduct of developing
-> [psxrecomp](https://github.com/mstan/psxrecomp)** — the games are the proving ground, the framework is the goal.
-> **These are in-development previews, not finished ports — expect rough
-> edges**, and depth will keep landing over months, not days. My time for any
-> one title is limited, so I ask for your patience. Contributions are welcome —
-> testing, issues, and PRs to the game or framework all help and will
-> accelerate this game's polish. More on the why at:
-> [Recomp + AI: 5 Months Later »](https://1379.tech/recomp-ai-5-months-later/)_
+# 🟣 Ape Escape — Play as Jake
 
-Ape Escape (USA, SCUS-94423) statically recompiled to a native PC executable
-with [PSXRecomp](https://github.com/mstan/psxrecomp) — the same framework behind
-[TombaRecomp](https://github.com/mstan/TombaRecomp) and
-[MegaManX6Recomp](https://github.com/mstan/MegaManX6Recomp).
+**A fan mod for Ape Escape (PlayStation, 1999): play the whole game as Jake.**
 
-Known issues live in [`ISSUES.md`](ISSUES.md).
+![PC: ApeEscapeRecomp](https://img.shields.io/badge/PC-ApeEscapeRecomp-7b4bd6?style=for-the-badge)
+![Emulator: DuckStation](https://img.shields.io/badge/Emulator-DuckStation-2f7ff0?style=for-the-badge)
+![Disc: SCUS-94423](https://img.shields.io/badge/Disc-Ape%20Escape%20(USA)%20SCUS--94423-f0a020?style=for-the-badge)
 
-Releases precompile 47 archive overlays and two minigame executables directly
-from the original disc using the shared psxrecomp AOT pipeline. See
-[AOT overlay evidence and limits](docs/AOT_OVERLAYS.md) and the
-[shared method guide](psxrecomp-v4/docs/AOT_SHARDING.md). Two unresolved archive
-members remain excluded; fallback stays enabled and complete static coverage
-is not claimed.
+<img src="docs/images/title.png" width="640" alt="Ape Escape Jake Edition title screen">
 
-## What This Is
+*Mod by **Flux** · [x.com/F1ux0r](https://x.com/F1ux0r)*
 
-This repository contains the game-specific configuration, seeds, tools, and
-build glue for running Ape Escape on the PSXRecomp framework. The game's MIPS
-code is machine-translated ("recompiled") ahead of time into native C, then
-compiled into a real Windows program that runs the game's own logic on a
-faithful simulation of the PS1 hardware (GPU, SPU, GTE, memory cards) plus the
-real, recompiled PS1 BIOS. Since v0.5.1 the framework's title timing scale
-keeps crowded areas at their original 30 FPS cadence while hardware-timed
-devices remain on the PlayStation clock; v0.5.2 applies it only during play.
-
-It does **not** contain the Ape Escape disc image, a retail PS1 BIOS, generated
-game code, or any decompiled game C. Release builds include the MIT-licensed
-OpenBIOS from PCSX-Redux; game data and an optional retail BIOS come from your
-own legally obtained assets.
-
-Important files:
-
-- `game.toml`: runtime / recompiler / video / controller / widescreen config.
-- `mods/preloaded/`: built-in, default-off mod packages shown by the launcher.
-- `seeds/`: Ghidra-derived function starts and game-specific seed data.
-- `tools/regen.ps1`: regenerates the recompiled C output.
-- `tools/package_release.ps1`: builds the redistributable release zip.
-- `psxrecomp-v4/`: framework submodule commit this project is known-good against.
-- `ISSUES.md`: game-specific issue log.
-- `DISC.md`: source-disc identity and verification hashes.
-
-## Status
-
-**Current release — `v0.5.2`.** Ape Escape **boots from the PS1 BIOS and
-plays** — through the intro, the title, and into gameplay, with dual-analog
-controller input including **L3/R3 stick clicks** (added in v0.0.3), a
-**controls fix** so the analog stick no longer spins the camera (v0.0.5),
-and working memory-card **save/load** (fixed in v0.0.2). It has not yet been verified all the way to the end,
-so treat it as a very playable preview rather than a certified full playthrough.
-
-| Area | State |
-|---|---|
-| Boot (real PS1 BIOS) | ✅ Boots to intro / title / gameplay |
-| Rendering | ✅ OpenGL (default) and Software backends |
-| Controller | ✅ DualShock analog (auto-bound; the net/movement scheme is dual-stick) |
-| Memory cards | ✅ Standard PS1 `.mcd` save/load |
-| Save states / rewind | ✅ Launcher-backed hotkeys and runtime state capture |
-| FMV / audio | ✅ MDEC video + XA/SPU audio (auto-skip FMV optional) |
-| Mods | ✅ Built-in catalog with Ape-specific and framework-owned enhancements |
-| Widescreen 16:9 / 21:9 / Adaptive | ✅ Opt-in 16:9, 21:9, and live-window adaptive modes |
-| Interpolated rendering | ✅ Opt-in display / 60 / 90 / 120 / 144 / 165 / 240 FPS |
-| Full playthrough | ⚠️ Not yet verified end-to-end |
-
-### Built-in mods
-
-The launcher's **Mods** page includes four Ape-specific bundled enhancements:
-
-- **Ape Escape Widescreen** moves the existing game-specific enhancement out
-  of generic Video settings. Its picker offers **16:9**, **21:9**, and
-  **Adaptive** (live window aspect from 4:3 through 21:9).
-- **Ape Escape Frame Interpolation** redraws intermediate camera and model
-  transforms using the game drawing code. Display refresh and fixed output
-  rates leave simulation, timers, audio and input at their stock cadence.
-  Existing Frame Smoothing selections use interpolation automatically.
-- **PGXP** adds subpixel geometry and perspective-correct textures. Internal
-  resolution, texture filtering and FMV filtering remain configurable in Settings.
-- **Skip FMVs** ends movies through the game's normal completion path.
-- **Quick Gadget Select**, contributed by mthsk, recreates the later Ape
-  Escape quick gadget switching flow for the face-button gadget menu.
-
-The widescreen mod uses Ape Escape's stable GTE projection-and-stretch path
-for a wider 3D field of view. HUD/UI proportion correction is enabled for its
-front ordering-table layer; remaining draw-distance and scene-culling limits
-are tracked in [`ISSUES.md`](ISSUES.md). With the mod disabled, 4:3
-presentation is unchanged.
-
-The launcher's Video page exposes **Supersampling (1x-4x)**,
-**Antialiasing**, and **Texture filtering**. On OpenGL, supersampling is true
-ordered-grid SSAA: geometry and shading are rasterized at a higher internal
-resolution and resolved to the window, while native PSX VRAM remains the
-authoritative game-visible buffer. Antialiasing controls the linear SSAA resolve
-and final presentation filtering; it is not RT64-style MSAA. Try **2x** first on
-a discrete GPU, keep texture filtering at **Nearest** for the authored PSX look,
-and return to 1x if a demanding scene misses full speed.
-
-## Playing
-
-1. Run `ApeEscapeRecomp.exe`. A launcher window opens.
-2. OpenBIOS is selected automatically. Optionally select your legally obtained
-   `SCPH1001.BIN` in the BIOS row.
-3. Set the game disc (a legally obtained Ape Escape (USA, SCUS-94423) image —
-   `.cue`+`.bin`, pick the `.cue`). Do **not** convert to a 2048-byte "cooked"
-   `.iso`; that discards the XA sectors used for FMV/audio.
-4. Adjust display options and select any features on the **Mods** page,
-   then press **Launch**.
-
-Ape Escape is a dual-analog title — the right stick swings the catch net — so an
-analog controller is strongly recommended. Any plugged pad is auto-bound and
-presented to the game as a DualShock; a keyboard folds onto the analog stick.
-Save states and rewind are exposed through launcher hotkeys; by default F7 opens
-the save-state menu and F8 rewinds.
-The disc path, optional retail BIOS choice, and options are saved next to the
-exe. Clear the BIOS row to return to OpenBIOS.
-
-## Development Rules
-
-- Use the real recompiled BIOS and real hardware simulation in PSXRecomp.
-- No HLE BIOS shims, no stubs, no fake events, no hand-edited generated files.
-- Framework changes go in `mstan/psxrecomp`, not here.
-- Game binaries, generated code, memory cards, Ghidra databases, and build
-  outputs stay local.
-- See `CLAUDE.md` for project-specific rules.
-
-## License
-
-PolyForm Noncommercial 1.0.0. See `LICENSE`.
-
-Ape Escape is copyright Sony Computer Entertainment / SIE. This repository
-contains none of the game's original binaries or assets. Release packages
-include PCSX-Redux OpenBIOS under the MIT notice in
-`bios/OpenBIOS.LICENSE`; they contain no retail BIOS, game assets, or disc data.
-The release executable contains a statically recompiled (machine-translated)
-build of the game's code.
+</div>
 
 ---
 
-<p align="center">
-  <sub><b>R.A.I.D. — Retro AI Development</b> · a Discord for AI-assisted retro reverse-engineering, decomp &amp; recomp</sub>
-</p>
+## ✨ What it does
+
+Spike wears **Jake's model everywhere**: in levels, cutscenes and on the title screen, which now reads **JAKE EDITION**. When Jake turns up in a level, he wears Spike's. Controls, animation and AI are unchanged; only the look changes.
+
+- 🔁 **Two looks.** Press **L1** on the title screen to swap:
+  - **NORMAL:** Jake before Specter gets to him, as in the opening.
+  - **BRAINWASHED:** Jake as he races you.
+- 🧢 **His HUD.** Jake's face, lives icon and health flame, and the extra-life pickup becomes his shirt.
+- 💜 **Purple gadgets.** The Stun Club, Time Net, gadget icons and more take Jake's purple.
+- 🗣️ **His voice.** Jake's jump yell and his "ouch" replace Spike's, and Spike's lines that Jake doesn't say are muted.
+- 💿 **Nothing copied from the game.** Jake's model, face and voice are read from **your own disc** when the game starts.
 
 <p align="center">
-  <a href="https://discord.gg/Ad9BwSzctP"><img src=".github/raid-discord.png" alt="Join the Retro AI Development (R.A.I.D.) Discord" width="200"></a>
+  <img src="docs/images/title-brainwashed.png" width="400" alt="Brainwashed look selected on the title">
+  <img src="docs/images/intro.png" width="400" alt="Jake in the opening cutscene">
+  <img src="docs/images/hub.png" width="400" alt="Jake in the Time Station">
 </p>
 
-## v0.4.0 rendering update
+---
 
-Game-code interpolation replaces Frame Smoothing while retaining saved rate selections. Adds internal-resolution presets, PGXP geometry/perspective correction and filtering options. Fixes the GPU foreground classification behind flickering black wall polygons. The memory-card menu uses its native layout in widescreen. Late beach-ball appearance remains under investigation.
+## 🎮 Pick your version
 
-## v0.5.1 crowded-scene timing fix
+| | 🖥️ **PC version** (ApeEscapeRecomp) | 🕹️ **Emulator version** (DuckStation) |
+|---|---|---|
+| **What it is** | A native Windows build of the game ([ApeEscapeRecomp](https://github.com/mstan/ApeEscapeRecomp)) with the mod built in | A patch (PPF) for your disc image, played in [DuckStation](https://github.com/stenzek/duckstation) |
+| **Extras** | Widescreen, frame smoothing and the recomp's other options; each save remembers the look it was made with | Your usual emulator setup, save states, controllers |
+| **Needs** | Windows 10/11 (64-bit) | DuckStation with **8MB RAM** turned on and a **200% CPU overclock** (see below) |
+| **Your disc** | Ape Escape (USA), SCUS-94423, as `.cue` + `.bin` | The Redump **Ape Escape (USA)** single `.bin` image |
 
-Ape Escape uses the smallest guest-cycle adjustment that removed the measured
-30 FPS misses in seven affected areas. VBlank, timers, CD, SPU, and DMA retain
-their original cadence. Windows and Linux now ship from the same published
-source build. See [release notes](RELEASE_NOTES.md) for the A/B measurements,
-save/load checks, and coverage limits.
+Either way you need **your own legally obtained copy** of Ape Escape (USA). Nothing from the game is included.
 
-## v0.5.2 gameplay-only timing scale
+---
 
-The v0.5.1 timing scale now applies only while a level is being played. Menus,
-the stage-select briefing and level intros run at their original pacing again.
+## 🖥️ PC version
+
+1. Download **`ApeEscapeRecomp-PlayAsJake-windows-x64.zip`** from [Releases](../../releases) and extract it anywhere.
+2. Run **`ApeEscapeRecomp.exe`**. The launcher opens.
+   - If Windows SmartScreen or Smart App Control blocks it, that's because the build isn't code-signed. On SmartScreen, choose *More info → Run anyway*.
+3. In the **Disc** row, pick your Ape Escape (USA) `.cue`. Leave the BIOS on OpenBIOS, or pick your own `SCPH1001.BIN`.
+4. On the **Mods** page, turn on **Ape Escape Play as Jake**.
+5. Press **Launch**, then pick your look with **L1** on the title screen.
+
+---
+
+## 🕹️ Emulator version
+
+### 1. Get the patch
+
+From [Releases](../../releases), download **`Ape Escape (USA) - Play as Jake (DuckStation 8MB).ppf`**.
+
+> Also using [Power Up Gadgets](https://github.com/F1ux0r/ape-escape-power-up-gadgets)? Two patches can't go on the same disc, so use **`Ape Escape (USA) - Play as Jake + Power Up Gadgets (DuckStation 8MB).ppf`** instead.
+
+### 2. Patch a copy of your disc
+
+The patch is for the **Redump Ape Escape (USA)** image: a single `Ape Escape (USA).bin` (SHA-256 `1ae17e78…852a`). Use any of these:
+
+- **In your browser:** [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/). Open the `.bin` as the ROM and the `.ppf` as the patch, then apply.
+- **On Windows:** PPF-O-Matic.
+- **With Python:** `python emulator/apply_ppf.py "Ape Escape (USA).bin" "<patch>.ppf" "Ape Escape (USA) [Jake].bin"`. This checks your image first and also writes a `.cue`.
+
+If you only end up with a `.bin`, put a `.cue` next to it with the same name:
+
+```
+FILE "Ape Escape (USA) [Jake].bin" BINARY
+  TRACK 01 MODE2/2352
+    INDEX 01 00:00:00
+```
+
+### 3. Set up DuckStation (Ape Escape only)
+
+The mod lives in the extra memory of a PlayStation dev console. Turn these on just for Ape Escape:
+
+- **Easiest:** copy [`emulator/SCUS-94423.ini`](emulator/SCUS-94423.ini) into DuckStation's `gamesettings` folder (on Windows, `%LOCALAPPDATA%\DuckStation\gamesettings\`).
+- **Or by hand:** right-click Ape Escape → **Game Properties**, then turn on:
+  - **Enable 8MB RAM (Dev Console)**
+  - **Enable Clock Speed Control (Overclocking/Underclocking)**, set to **200%**
+
+Without 8MB RAM the patched disc plays the original game.
+
+### 4. Play
+
+Open the patched `.cue` in DuckStation. The mod takes a few extra seconds to load at boot. Every boot starts with the **NORMAL** look; press **L1** on the title screen to switch.
+
+---
+
+## ❤️ Credits
+
+| | |
+|---|---|
+| 🛠️ **Mod** | **Flux** · [x.com/F1ux0r](https://x.com/F1ux0r) · [github.com/F1ux0r](https://github.com/F1ux0r) |
+| 🐒 **Ape Escape** | © 1999 **Sony Computer Entertainment Inc.**, developed by **SCE Japan Studio**. |
+| 🎮 **PlayStation** | "PlayStation" and the PlayStation logos are trademarks of **Sony Interactive Entertainment Inc.** |
+| 🖥️ **ApeEscapeRecomp / PSXRecomp** | The PC recompilation this mod is built on, by **[mstan](https://github.com/mstan)**: [ApeEscapeRecomp](https://github.com/mstan/ApeEscapeRecomp), [PSXRecomp](https://github.com/mstan/psxrecomp) |
+| 💾 **OpenBIOS** | From **[PCSX-Redux](https://github.com/grumpycoders/pcsx-redux)** (MIT), included with the PC version |
+| 🕹️ **DuckStation** | The emulator the emulator version is made for, by **[Stenzek](https://github.com/stenzek/duckstation)** |
+| 🔧 **Toolchain** | MIPS GCC from **[PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK)**, used to build the emulator version |
+
+Unofficial fan project, **not affiliated with, endorsed or sponsored by Sony** or any of the projects above. No game data, BIOS or copyrighted assets from Ape Escape are included. Please support the official releases.
+
+> 📚 This repository is a fork of ApeEscapeRecomp with the mod added (`src/mods/ape_play_as_jake_plugin.c`, `mods/preloaded/packages/ape.enhancement.play-as-jake`). The recomp's own README is kept in [`RECOMP_README.md`](RECOMP_README.md).
