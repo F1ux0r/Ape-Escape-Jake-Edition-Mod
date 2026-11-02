@@ -64,9 +64,9 @@ Either way you need **your own legally obtained copy** of Ape Escape (USA). Noth
 
 ### 1. Get the patch
 
-From [Releases](../../releases), download **`Ape Escape (USA) - Play as Jake (DuckStation 8MB).ppf`**.
+From [Releases](../../releases), download **`ApeEscape-PlayAsJake-DuckStation8MB.ppf`**.
 
-> Also using [Power Up Gadgets](https://github.com/F1ux0r/ape-escape-power-up-gadgets)? Two patches can't go on the same disc, so use **`Ape Escape (USA) - Play as Jake + Power Up Gadgets (DuckStation 8MB).ppf`** instead.
+> Also using [Power Up Gadgets](https://github.com/F1ux0r/ape-escape-power-up-gadgets)? Two patches can't go on the same disc, so use **`ApeEscape-PlayAsJake+PowerUpGadgets-DuckStation8MB.ppf`** instead.
 
 ### 2. Patch a copy of your disc
 
