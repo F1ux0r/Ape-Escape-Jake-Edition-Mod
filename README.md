@@ -14,6 +14,9 @@
 
 </div>
 
+> [!WARNING]
+> **Work in progress.** Expect bugs, and the game may crash. Save often, and please report problems on the [Issues](../../issues) page.
+
 ---
 
 ## ✨ What it does
