@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🟣 Ape Escape — Play as Jake
+# 🟣 Ape Escape (Jake Edition Mod)
 
 **A fan mod for Ape Escape (PlayStation, 1999): play the whole game as Jake.**
 
