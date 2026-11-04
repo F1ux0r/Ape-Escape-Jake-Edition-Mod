@@ -365,3 +365,8 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Tools: present_shot (debug) captures the game frame even when the window is covered; capture_game_window.ps1
   grabs whatever is on screen. port.py patches the jake_purple_trail/save_looks_tick lines verbatim - keep them
   adjacent.
+- Follow-up: airborne, the flyer draws the spin-glow disc instead of the blades (entry 0x800EC180, polys 0x8010B214,
+  textured triangles op 0x36 on palette 944,470), also via 0x800161C0 and also from 0x80039E8C for the CPU (player:
+  0x8009B33C for both). JAKE_GREEN_FLYER_MODELS = blades (504 -> green copy 976,494) + disc (470 -> 992,494); any
+  textured poly (op & 0xE4 == 0x24 family, palette at +14) on the model's violet palette is switched. Verified airborne
+  frames on menu slot 4: CPU disc green, player blades violet.

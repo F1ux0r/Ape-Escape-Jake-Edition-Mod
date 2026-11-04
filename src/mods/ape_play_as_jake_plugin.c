@@ -1219,33 +1219,47 @@ static void jake_purple_trail(void) {
 }
 
 /*
- * The race's other Sky Flyer stays green. The propeller (model entry
- * 0x800EC0C0, 8 blade quads textured with palette 944,504) is one model
+ * The race's other Sky Flyer stays green. Its two models are each one model
  * drawn by 0x800161C0 (a0 = model entry) for every holder, so the violet
- * palette above reaches whoever else holds one. The player's flyer is drawn
- * from his handler (returning to 0x8009B33C); the CPU racer's from
- * 0x80039E84 (returning to 0x80039E8C), found by logging every caller of a
- * propeller draw in the Jake Attack race. The gadget menu draws its own
- * from 0x80099C94, so it keeps the violet. Each CPU draw notes where its packets
- * start (the packet pointer) and end (the pointer at the next model draw),
- * and before the frame goes to the GPU its blade quads are pointed at a copy
- * of the stock green palette kept at (976,494), which is free (the title
+ * palettes above reach whoever else holds one:
+ *  - the propeller, entry 0x800EC0C0: 8 blade quads, palette 944,504;
+ *  - the spin-glow disc while flying, entry 0x800EC180: textured triangles,
+ *    palette 944,470.
+ * The player's flyer is drawn from his handler (returning to 0x8009B33C);
+ * the CPU racer's, both models, from 0x80039E84 (returning to 0x80039E8C),
+ * found by logging every caller of these draws in the Jake Attack race. The
+ * gadget menu draws its own from 0x80099C94, so it keeps the violet. Each
+ * CPU draw notes where its packets start (the packet pointer) and end (the
+ * pointer at the next model draw), and before the frame goes to the GPU its
+ * textured polys on the model's palette are pointed at a copy of the stock
+ * green one, kept at (976,494) and (992,494), which are free (the title
  * atlas only uses (960,494)).
  */
 static const uint32_t JAKE_MODEL_DRAW_FUNCTION = 0x800161C0u;
-static const uint32_t JAKE_FLYER_PROP_ENTRY = 0x800EC0C0u;
 static const uint32_t JAKE_GREEN_FLYER_RETURNS[] = { 0x80039E8Cu };
+static const struct {
+    uint32_t entry;            /* model entry; matched by its poly list */
+    uint16_t clut_y;           /* the JAKE_CLUT_SWAPS row at x 944 */
+    uint16_t green_x;          /* where the stock copy goes, on row 494 */
+} JAKE_GREEN_FLYER_MODELS[] = {
+    { 0x800EC0C0u, 504u, 976u },   /* propeller blades */
+    { 0x800EC180u, 470u, 992u },   /* spin-glow disc */
+};
 enum {
-    JAKE_FLYER_TEX_CLUT = (504 << 6) | (944 >> 4),
-    JAKE_GREEN_FLYER_X = 976, JAKE_GREEN_FLYER_Y = 494,
-    JAKE_GREEN_FLYER_CLUT = (JAKE_GREEN_FLYER_Y << 6) | (JAKE_GREEN_FLYER_X >> 4),
-    JAKE_GREEN_FLYER_MAX = 4, JAKE_GREEN_FLYER_SCAN = 64
+    JAKE_GREEN_FLYER_Y = 494,
+    JAKE_GREEN_FLYER_MODEL_COUNT = sizeof(JAKE_GREEN_FLYER_MODELS) / sizeof(JAKE_GREEN_FLYER_MODELS[0]),
+    JAKE_GREEN_FLYER_MAX = 8, JAKE_GREEN_FLYER_SCAN = 64
 };
 static uint32_t g_green_start[JAKE_GREEN_FLYER_MAX], g_green_end[JAKE_GREEN_FLYER_MAX];
+static uint8_t g_green_model[JAKE_GREEN_FLYER_MAX];
 static uint32_t g_green_count;
 static uint8_t g_force_upload;     /* re-upload palettes and face next frame */
 static int g_green_open;          /* the last noted draw has no end yet */
-static uint8_t g_green_flyer_seen; /* keep the green copy uploaded */
+static uint8_t g_green_flyer_seen; /* keep the green copies uploaded */
+
+static uint16_t jake_clut_word(uint32_t x, uint32_t y) {
+    return (uint16_t)((y << 6) | (x >> 4));
+}
 
 static void jake_close_green_draw(void) {
     if (g_green_open) {
@@ -1256,13 +1270,17 @@ static void jake_close_green_draw(void) {
 
 static void jake_model_draw_entry(struct CPUState* cpu, uint32_t address) {
     const uint32_t entry = cpu->gpr[4], ra = cpu->gpr[31];
-    uint32_t i;
+    uint32_t i, m;
     (void)address;
     if (!g_enabled)
         return;
     jake_close_green_draw();
-    if (!jake_ram_pointer(entry) ||
-        psx_mod_read_word(entry + 8u) != psx_mod_read_word(JAKE_FLYER_PROP_ENTRY + 8u))
+    if (!jake_ram_pointer(entry))
+        return;
+    for (m = 0; m < JAKE_GREEN_FLYER_MODEL_COUNT; ++m)
+        if (psx_mod_read_word(entry + 8u) == psx_mod_read_word(JAKE_GREEN_FLYER_MODELS[m].entry + 8u))
+            break;
+    if (m == JAKE_GREEN_FLYER_MODEL_COUNT)
         return;
     for (i = 0; i < sizeof JAKE_GREEN_FLYER_RETURNS / sizeof JAKE_GREEN_FLYER_RETURNS[0]; ++i)
         if (ra == JAKE_GREEN_FLYER_RETURNS[i])
@@ -1274,24 +1292,30 @@ static void jake_model_draw_entry(struct CPUState* cpu, uint32_t address) {
         g_green_flyer_seen = 1u;
         g_force_upload = 1u;
     }
+    g_green_model[g_green_count] = (uint8_t)m;
     g_green_start[g_green_count++] = psx_mod_read_word(JAKE_PACKET_POINTER);
     g_green_open = 1;
 }
 
-/* At DrawOTag: the noted draws' blade quads (op 0x3C-0x3F, 13 words, the
- * palette in the third word's high half) go to the green copy. */
+/* At DrawOTag: the noted draws' textured polys (ops 0x24-0x3F with bit 2;
+ * the palette is the third word's high half in every one of them) on the
+ * model's palette go to its green copy. */
 static void jake_green_flyers(void) {
     uint32_t d, n;
     jake_close_green_draw();
     for (d = 0; d < g_green_count; ++d) {
+        const uint16_t violet = jake_clut_word(944u, JAKE_GREEN_FLYER_MODELS[g_green_model[d]].clut_y);
+        const uint16_t green = jake_clut_word(JAKE_GREEN_FLYER_MODELS[g_green_model[d]].green_x,
+                                              JAKE_GREEN_FLYER_Y);
         uint32_t p = g_green_start[d];
         for (n = 0; n < JAKE_GREEN_FLYER_SCAN && p < g_green_end[d] && jake_ram_pointer(p); ++n) {
             const uint32_t words = psx_mod_read_byte(p + 3u);
+            const uint32_t op = psx_mod_read_byte(p + 7u);
             if (words == 0u || words > 16u)
                 break;
-            if (words == 12u && (psx_mod_read_byte(p + 7u) & 0xFCu) == 0x3Cu &&
-                psx_mod_read_half(p + 14u) == JAKE_FLYER_TEX_CLUT)
-                psx_mod_write_half(p + 14u, JAKE_GREEN_FLYER_CLUT);
+            if (words >= 7u && (op & 0xE0u) == 0x20u && (op & 4u) &&
+                psx_mod_read_half(p + 14u) == violet)
+                psx_mod_write_half(p + 14u, green);
             p += 4u + words * 4u;
         }
     }
@@ -1491,13 +1515,17 @@ static void jake_upload_face(uint32_t table) {
             words[3 + k / 2] = swap->ours[k] | ((uint32_t)swap->ours[k + 1] << 16);
         jake_link_packet(far_entry, words, 3u + swap->count / 2u);
     }
-    /* The stock green Sky Flyer palette, for the race's other flyer. */
+    /* The stock green Sky Flyer palettes, for the race's other flyer. */
     for (row = 0; g_green_flyer_seen && row < JAKE_CLUT_SWAP_COUNT; ++row) {
         const JakeClutSwap* swap = &JAKE_CLUT_SWAPS[row];
-        if (swap->x != 944u || swap->y != 504u)
+        uint32_t m;
+        for (m = 0; m < JAKE_GREEN_FLYER_MODEL_COUNT; ++m)
+            if (swap->x == 944u && swap->y == JAKE_GREEN_FLYER_MODELS[m].clut_y)
+                break;
+        if (m == JAKE_GREEN_FLYER_MODEL_COUNT)
             continue;
         words[0] = 0xA0000000u;
-        words[1] = ((uint32_t)JAKE_GREEN_FLYER_Y << 16) | JAKE_GREEN_FLYER_X;
+        words[1] = ((uint32_t)JAKE_GREEN_FLYER_Y << 16) | JAKE_GREEN_FLYER_MODELS[m].green_x;
         words[2] = (1u << 16) | swap->count;
         for (k = 0; k < swap->count; k += 2)
             words[3 + k / 2] = swap->stock[k] | ((uint32_t)swap->stock[k + 1] << 16);
