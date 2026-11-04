@@ -385,3 +385,15 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   5 halfwords x 16 rows from column 24; palette (game's 464,504) at 0x11114. Read at startup (no game art in the repo),
   uploaded on the race select to (960,496) + palette (1008,494) (free there), X packet repointed (page 0x1F, raw 0x65,
   20x16, x-1/y-1) only on levels 6 and 13. Peak Point Matrix (also Dimension X) keeps its X - verified.
+
+## 2026-11-03 Jake: savestates load right after boot; hoop whir fix
+- Savestate header cookie = mod memory in use (mod_memory_used, gpu_dma used); the plugin used to reserve buffers the
+  first time each was needed, so a state from deep in the game was refused until the same things had been seen again.
+  jake_reserve_memory (end of jake_load_from_disc: first frame on PC, boot on the PS1) now reserves all of them in one
+  order: club/hoop colour lists (filled there), net copy, 10 tint lists, both look meshes (mesh + 328 Spike verts),
+  title quads x2, arenas x2. Verified: state saved in Fossil Field, game restarted, state loaded from the title.
+  Old states (made before this) no longer load.
+- Super Hoop spin-and-run whir = the Sky Flyer's propeller loop SPU 0x03850 at 0x2E9 (spu_voices while spinning), so
+  the pitch swap turned it into Jake's flyer tone. Player flyer rules now only apply while held gadget 0x800EC2D2 = 6;
+  hoop verified back at 0x2E9. Race CPU rule (0x80E -> 0x2E9) unchanged.
+- Test slots now: menu slot 6 (debug 5) = Fossil Field, hoop held, paused (music off).

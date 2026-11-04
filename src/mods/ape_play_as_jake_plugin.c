@@ -1537,6 +1537,7 @@ static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
 }
 
 static void jake_load_from_disc(void);
+static void jake_reserve_memory(void);
 
 static void jake_vblank(void) {
     static uint32_t ticks;
@@ -1606,6 +1607,9 @@ static int jake_retarget_polys(uint8_t* mesh, uint32_t polys, uint32_t end, uint
  * vertex list is followed by Spike's own vertices from 293 on: any such
  * index still lands on Spike's matching point instead of on polys.
  */
+enum { JAKE_SPIKE_VERTS = 328 };   /* Spike's mesh, every level checked */
+static uint32_t g_look_base[JAKE_LOOKS], g_look_capacity[JAKE_LOOKS];
+
 static int jake_build_look(int look, uint32_t spike_object) {
     uint8_t mesh[0x1E38];
     const uint32_t size = JAKE_LOOK_DISC[look].mesh_size;
@@ -1623,7 +1627,10 @@ static int jake_build_look(int look, uint32_t spike_object) {
     spike_verts = psx_mod_read_half(psx_mod_read_word(spike_object) + 6u);
     if (spike_verts < jake_verts)
         spike_verts = jake_verts;
-    base = psx_mod_alloc_guest_memory(size + spike_verts * 8u, 16u);
+    /* Reserved on the first frame (jake_reserve_memory) for the usual
+     * Spike; a bigger one would need its own buffer. */
+    base = spike_verts <= g_look_capacity[look] ? g_look_base[look]
+                                                 : psx_mod_alloc_guest_memory(size + spike_verts * 8u, 16u);
     if (base == 0u)
         return 0;
     for (k = 0; k < size; k += 4)
@@ -2524,14 +2531,20 @@ static void jake_click_vblank(void) {
  * (a new key-on) is remapped again, and a voice that stops sounding is
  * forgotten.
  */
-static const struct { uint16_t sample, from, to; } g_flyer_pitches[] = {
-    { 0x03850 >> 3, 0x2E9, 0x80E },   /* player flying: Spike's -> Jake's */
-    { 0x03850 >> 3, 0x80E, 0x2E9 },   /* race Jake flying: Jake's -> Spike's */
-    { 0x06970 >> 3, 0x297, 0x580 },   /* player slow spin, chosen by ear */
+static const struct { uint16_t sample, from, to, player; } g_flyer_pitches[] = {
+    { 0x03850 >> 3, 0x2E9, 0x80E, 1 },   /* player flying: Spike's -> Jake's */
+    { 0x03850 >> 3, 0x80E, 0x2E9, 0 },   /* race Jake flying: Jake's -> Spike's */
+    { 0x06970 >> 3, 0x297, 0x580, 1 },   /* player slow spin, chosen by ear */
 };
+/* The Super Hoop's spin-and-run whir plays one of these samples too (it
+ * came out as Jake's flyer tone), so the player's rules only apply while
+ * he holds the Sky Flyer (held gadget 0x800EC2D2 = 6). */
+static const uint32_t JAKE_HELD_GADGET = 0x800EC2D2u;
+enum { JAKE_GADGET_SKY_FLYER = 6 };
 static uint16_t g_flyer_written[SPU_VOICES];
 
 static void jake_flyer_pitch_vblank(void) {
+    const int holds_flyer = psx_mod_read_byte(JAKE_HELD_GADGET) == JAKE_GADGET_SKY_FLYER;
     int voice;
     unsigned i;
     for (voice = 0; voice < SPU_VOICES; ++voice) {
@@ -2547,7 +2560,8 @@ static void jake_flyer_pitch_vblank(void) {
             continue;
         g_flyer_written[voice] = 0u;
         for (i = 0; i < sizeof g_flyer_pitches / sizeof g_flyer_pitches[0]; ++i)
-            if (g_flyer_pitches[i].sample == sample && g_flyer_pitches[i].from == pitch) {
+            if (g_flyer_pitches[i].sample == sample && g_flyer_pitches[i].from == pitch &&
+                (!g_flyer_pitches[i].player || holds_flyer)) {
                 psx_mod_write_half(base + 0x4u, g_flyer_pitches[i].to);
                 g_flyer_written[voice] = g_flyer_pitches[i].to;
                 break;
@@ -2860,12 +2874,47 @@ static void jake_load_from_disc(void) {
     jake_load_disc(&dat);
     jake_load_voice(&dat);
     free(dat.data);
+    jake_reserve_memory();
 }
 
 static void jake_activate(void) {
     g_enabled = 1u;
     jake_find_cards();
     jake_save_looks_read();
+}
+
+/*
+ * Every buffer the mod puts in guest memory or GPU memory, reserved on the
+ * first frame in one fixed order (each was reserved the first time it was
+ * needed). A savestate records how much mod memory was in use and is only
+ * loaded into a run using the same amount, and the mod keeps its buffers'
+ * addresses itself: with the same order every run, states load from the
+ * title on and every buffer is where the state expects it.
+ */
+static void jake_reserve_memory(void) {
+    uint32_t t, k, index;
+    int look;
+    if ((g_club_purple = psx_mod_alloc_guest_memory(3u * 4u, 16u)) != 0u)
+        for (k = 0; k < 3u; ++k)
+            psx_mod_write_word(g_club_purple + k * 4u, JAKE_CLUB_PURPLE[k]);
+    if ((g_hoop_neutral = psx_mod_alloc_guest_memory(3u * 4u, 16u)) != 0u)
+        for (k = 0; k < 3u; ++k)
+            psx_mod_write_word(g_hoop_neutral + k * 4u, JAKE_HOOP_NEUTRAL[k]);
+    g_net_purple = psx_mod_alloc_guest_memory(JAKE_NET_MAX_COLOURS * 4u, 16u);
+    for (t = 0; t < JAKE_MODEL_TINT_COUNT; ++t)
+        g_tint_lists[t] = psx_mod_alloc_guest_memory(JAKE_MODEL_TINTS[t].count * 4u, 16u);
+    for (look = 0; look < JAKE_LOOKS; ++look) {
+        const uint32_t jake_verts = jake_get16(g_look_mesh[look] + 6);
+        const uint32_t verts = jake_verts > JAKE_SPIKE_VERTS ? jake_verts : JAKE_SPIKE_VERTS;
+        if (!g_look_ok[look])
+            continue;
+        g_look_base[look] = psx_mod_alloc_guest_memory(JAKE_LOOK_DISC[look].mesh_size + verts * 8u, 16u);
+        g_look_capacity[look] = g_look_base[look] != 0u ? verts : 0u;
+    }
+    for (index = 0; index < 2u; ++index) {
+        g_title_quads[index] = psx_mod_alloc_gpu_dma_memory(TITLE_QUADS * 40u, 16u);
+        g_arena[index] = psx_mod_alloc_gpu_dma_memory(JAKE_ARENA_SIZE, 16u);
+    }
 }
 
 PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
