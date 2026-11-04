@@ -29,6 +29,7 @@ Spike wears **Jake's model everywhere**: in levels, cutscenes and on the title s
 - 🧢 **His HUD.** Jake's face, lives icon and health flame, and the extra-life pickup becomes his shirt.
 - 💜 **Purple gadgets.** The Stun Club, Time Net, gadget icons and more take Jake's purple.
 - 🗣️ **His voice.** Jake's jump yell and his "ouch" replace Spike's, and Spike's lines that Jake doesn't say are muted.
+- 🏁 **His races are Spike's now.** Jake's races are renamed **Spike Attack** and **Spike Attack 2**, with Spike's face in place of the X in "Dimension X". You get Jake's Sky Flyer sound while Spike flies with his own green flyer, and winning says **"Jake Wins!"**.
 - 💿 **Nothing copied from the game.** Jake's model, face and voice are read from **your own disc** when the game starts.
 
 <p align="center">
