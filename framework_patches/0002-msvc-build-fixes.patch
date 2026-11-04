@@ -1,0 +1,26 @@
+diff --git a/runtime/src/debug_server.c b/runtime/src/debug_server.c
+index a8e42dc7..fe409e6b 100644
+--- a/runtime/src/debug_server.c
++++ b/runtime/src/debug_server.c
+@@ -1,3 +1,6 @@
++#if defined(_MSC_VER) && !defined(strtok_r)
++#define strtok_r strtok_s  /* MSVC has no POSIX strtok_r; strtok_s has the same signature */
++#endif
+ /*
+  * debug_server.c -- TCP debug server for PSX recomp v4
+  *
+diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
+index d3c2326c..a0365dfb 100644
+--- a/runtime/src/main.cpp
++++ b/runtime/src/main.cpp
+@@ -15588,8 +15588,8 @@ int main(int argc, char** argv) {
+      * activation plugins apply them after launcher/settings resolution. */
+     constexpr bool ws_offered = false;
+     constexpr bool ws_ultrawide_offered = false;
+-    constexpr bool frame_interpolation_offered = false;
+-    constexpr bool skip_fmv_offered = false;
++    static constexpr bool frame_interpolation_offered = false;
++    static constexpr bool skip_fmv_offered = false;
+     /* Load acceleration is likewise mod-owned (Fast Loading / CD Speed). The
+      * former game.toml `offer_turbo_loads` opt-out is deprecated and ignored:
+      * offering the generic switch is no longer possible for any title, so a
