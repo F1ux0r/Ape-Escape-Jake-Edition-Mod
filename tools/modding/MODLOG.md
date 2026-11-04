@@ -399,3 +399,11 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   seen in the last 30 s (g_jake_own_frame) and the hoop (gadget 4) not held; player rules need gadget 6 held. With the
   mod on the hoop now matches stock exactly. Not re-checked in the race (no race state since the memory change).
 - Test slots now: menu slot 6 (debug 5) = Fossil Field, hoop held, paused (music off).
+
+## 2026-11-03 Jake: race result line swapped
+- KKIIDDZZ.BNS has no header (code from byte 0); the results module starts at file 0x1C000 and loads at 0x80136000
+  (its code points exactly at its strings; race-select module = file 0x26000 at 0x80136000 too, i.e. file 0x299E8 =
+  RAM 0x801399E8). "Monkeys Captured|Spike Wins!|Jake Wins!" at 0x80139934, picked by counting terminators ('!' =
+  0x7E). jake_swap_result_lines writes the two win lines in each other's place (same total bytes). User won a Spike
+  race: screen said "Jake Wins!".
+- Windows Smart App Control blocked a fresh unsigned build (reputation) on 2026-11-03; the user turned SAC off.

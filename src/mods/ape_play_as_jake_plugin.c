@@ -1443,6 +1443,39 @@ static void jake_rename_races(void) {
     }
 }
 
+/*
+ * The race's result line. The results overlay (KKIIDDZZ.BNS from 0x1C000,
+ * loaded at 0x80136000: its code points at its own strings there) has
+ * "Monkeys Captured", "Spike Wins!", "Jake Wins!" as one zero-terminated
+ * list at 0x80139934, picked by counting terminators. The player is Jake
+ * and the CPU Spike now, so the two win lines trade places: same bytes in
+ * all, so every terminator keeps its count.
+ */
+static const uint32_t JAKE_RESULT_LINES = 0x80139934u;
+static const uint8_t JAKE_RESULT_STOCK[] = {
+    0x1C, 0x3E, 0x3D, 0x3A, 0x34, 0x48, 0x42, 0xFF,                   /* Monkeys_ */
+    0x12, 0x30, 0x3F, 0x43, 0x44, 0x41, 0x34, 0x33, 0x00,             /* Captured */
+    0x22, 0x3F, 0x38, 0x3A, 0x34, 0xFF, 0x26, 0x38, 0x3D, 0x42, 0x7E, 0x00,   /* Spike Wins! */
+    0x19, 0x30, 0x3A, 0x34, 0xFF, 0x26, 0x38, 0x3D, 0x42, 0x7E, 0x00          /* Jake Wins! */
+};
+static const uint8_t JAKE_RESULT_SWAPPED[] = {
+    0x1C, 0x3E, 0x3D, 0x3A, 0x34, 0x48, 0x42, 0xFF,
+    0x12, 0x30, 0x3F, 0x43, 0x44, 0x41, 0x34, 0x33, 0x00,
+    0x19, 0x30, 0x3A, 0x34, 0xFF, 0x26, 0x38, 0x3D, 0x42, 0x7E, 0x00,         /* Jake Wins! */
+    0x22, 0x3F, 0x38, 0x3A, 0x34, 0xFF, 0x26, 0x38, 0x3D, 0x42, 0x7E, 0x00    /* Spike Wins! */
+};
+
+static void jake_swap_result_lines(void) {
+    uint32_t k;
+    if (psx_mod_read_byte(JAKE_RESULT_LINES) != JAKE_RESULT_STOCK[0])
+        return;
+    for (k = 0; k < sizeof JAKE_RESULT_STOCK; ++k)
+        if (psx_mod_read_byte(JAKE_RESULT_LINES + k) != JAKE_RESULT_STOCK[k])
+            return;
+    for (k = 0; k < sizeof JAKE_RESULT_SWAPPED; ++k)
+        psx_mod_write_byte(JAKE_RESULT_LINES + k, JAKE_RESULT_SWAPPED[k]);
+}
+
 static void jake_link_packet(uint32_t entry, const uint32_t* words, uint32_t count);
 
 /*
@@ -1559,6 +1592,7 @@ static void jake_vblank(void) {
     jake_click_vblank();
     jake_flyer_pitch_vblank();
     jake_rename_races();
+    jake_swap_result_lines();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
