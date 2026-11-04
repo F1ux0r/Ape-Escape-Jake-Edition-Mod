@@ -341,3 +341,14 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
 - Labels under each picture (x 288..352, y 32+48n) only on frames that draw the side panel (0x2D quads x 280..360).
   GOTCHA: this screen presents a buffer while it is still being drawn - packets at the END of the OT were missing
   from ~50% of shown frames (also true for an untextured box). Insert right after the panel quads instead.
+
+## 2026-11-03 Jake: Sky Flyer tones swapped
+- Player and race Jake key the same propeller loop SPU 0x03850 (loop from block 2): player pitch 0x2E9 (constant at
+  any spin speed), race Jake 0x80E (~2.8x, panned/distance volume, held ~109 frames). Slow spin (< ~2.5 rev/s) plays
+  a separate player-only sample 0x06970 at 0x297 first; flight end = 0x066C0. Measured with spu_events/spu_voices on
+  race savestates (menu slot 2 = debug 1: just before race Jake flies; menu 3 = debug 2: player holding the flyer).
+- jake_flyer_pitch_vblank remaps per voice: player flying 0x2E9 -> 0x80E, race Jake 0x80E -> 0x2E9, slow spin
+  0x297 -> 0x580 (user picked from previews; the straight ratio 0x72B sounded higher than the flying tone). Each voice
+  remembers the pitch written so a swapped value isn't swapped back. Verified live (spu_voices), user approved by ear.
+- Savestates only load once the plugin's lazy guest allocations match (header cookie = mod memory used): after a
+  rebuild, boot and reach the Jake Attack race selection before loading the race states.

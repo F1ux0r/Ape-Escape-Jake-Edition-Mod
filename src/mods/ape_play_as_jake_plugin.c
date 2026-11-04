@@ -846,6 +846,7 @@ static void jake_spawn_vblank(void) {
 }
 
 static void jake_click_vblank(void);
+static void jake_flyer_pitch_vblank(void);
 
 /* ---- Purple gadgets ----------------------------------------------------- */
 
@@ -1243,6 +1244,7 @@ static void jake_vblank(void) {
     jake_outro_vblank();
     jake_spawn_vblank();
     jake_click_vblank();
+    jake_flyer_pitch_vblank();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
@@ -2170,6 +2172,57 @@ static void jake_play_click(uint16_t pitch) {
 static void jake_click_vblank(void) {
     if (g_click_voice >= 0 && ++g_click_frames > CLICK_FRAMES)
         jake_release_click();
+}
+
+/*
+ * Sky Flyer tones trade places with the characters. The player and the race
+ * Jake key the same propeller loop (SPU 0x03850, loop point at block 2):
+ * the player at pitch 0x2E9 (constant at any spin speed; the slow-spin low
+ * tone is a separate sample, 0x06970), race Jake at 0x80E, about 2.8x
+ * higher. Measured with spu_events on the race savestates. The player is
+ * Jake now and race Jake wears Spike, so each gets the other's pitch; the
+ * race Jake's panned, distance-scaled volume is left alone. Nothing else in
+ * the game keys this sample.
+ *
+ * The player's slow-spin tone (SPU 0x06970, pitch 0x297; only the player
+ * plays it) goes up to 0x580, picked by ear from previews leading into
+ * Jake's flying tone. The full 0x80E/0x2E9 ratio (0x72B) sounded higher
+ * than the flying tone itself.
+ *
+ * Once changed, a voice's pitch can equal another rule's original, so each
+ * voice remembers the pitch written to it: the game writing anything else
+ * (a new key-on) is remapped again, and a voice that stops sounding is
+ * forgotten.
+ */
+static const struct { uint16_t sample, from, to; } g_flyer_pitches[] = {
+    { 0x03850 >> 3, 0x2E9, 0x80E },   /* player flying: Spike's -> Jake's */
+    { 0x03850 >> 3, 0x80E, 0x2E9 },   /* race Jake flying: Jake's -> Spike's */
+    { 0x06970 >> 3, 0x297, 0x580 },   /* player slow spin, chosen by ear */
+};
+static uint16_t g_flyer_written[SPU_VOICES];
+
+static void jake_flyer_pitch_vblank(void) {
+    int voice;
+    unsigned i;
+    for (voice = 0; voice < SPU_VOICES; ++voice) {
+        const uint32_t base = SPU_VOICE_BASE + (uint32_t)voice * 0x10u;
+        const uint16_t sample = psx_mod_read_half(base + 0x6u);
+        uint16_t pitch;
+        if (psx_mod_read_half(base + 0xCu) == 0u) {
+            g_flyer_written[voice] = 0u;
+            continue;
+        }
+        pitch = psx_mod_read_half(base + 0x4u);
+        if (pitch == g_flyer_written[voice])
+            continue;
+        g_flyer_written[voice] = 0u;
+        for (i = 0; i < sizeof g_flyer_pitches / sizeof g_flyer_pitches[0]; ++i)
+            if (g_flyer_pitches[i].sample == sample && g_flyer_pitches[i].from == pitch) {
+                psx_mod_write_half(base + 0x4u, g_flyer_pitches[i].to);
+                g_flyer_written[voice] = g_flyer_pitches[i].to;
+                break;
+            }
+    }
 }
 
 /* On the title: L1 (pressed, not held) switches the look. */
