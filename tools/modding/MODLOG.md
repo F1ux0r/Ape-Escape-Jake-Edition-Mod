@@ -393,7 +393,9 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   order: club/hoop colour lists (filled there), net copy, 10 tint lists, both look meshes (mesh + 328 Spike verts),
   title quads x2, arenas x2. Verified: state saved in Fossil Field, game restarted, state loaded from the title.
   Old states (made before this) no longer load.
-- Super Hoop spin-and-run whir = the Sky Flyer's propeller loop SPU 0x03850 at 0x2E9 (spu_voices while spinning), so
-  the pitch swap turned it into Jake's flyer tone. Player flyer rules now only apply while held gadget 0x800EC2D2 = 6;
-  hoop verified back at 0x2E9. Race CPU rule (0x80E -> 0x2E9) unchanged.
+- Super Hoop spin-and-run (measured with the Jake mod OFF): its own whir SPU 0x13360 @0x52F plus the Sky Flyer's
+  propeller loop 0x03850 @0x80E (race Jake's flyer pitch), 0x11AC0, 0x066C0. The race CPU rule (0x80E -> 0x2E9) turned
+  the hoop's loop into Spike's flyer tone (the user's "hoop plays the Sky Flyer sfx"). The race rule now needs race Jake
+  seen in the last 30 s (g_jake_own_frame) and the hoop (gadget 4) not held; player rules need gadget 6 held. With the
+  mod on the hoop now matches stock exactly. Not re-checked in the race (no race state since the memory change).
 - Test slots now: menu slot 6 (debug 5) = Fossil Field, hoop held, paused (music off).

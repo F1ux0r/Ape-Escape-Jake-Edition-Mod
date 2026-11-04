@@ -2531,20 +2531,26 @@ static void jake_click_vblank(void) {
  * (a new key-on) is remapped again, and a voice that stops sounding is
  * forgotten.
  */
-static const struct { uint16_t sample, from, to, player; } g_flyer_pitches[] = {
-    { 0x03850 >> 3, 0x2E9, 0x80E, 1 },   /* player flying: Spike's -> Jake's */
-    { 0x03850 >> 3, 0x80E, 0x2E9, 0 },   /* race Jake flying: Jake's -> Spike's */
-    { 0x06970 >> 3, 0x297, 0x580, 1 },   /* player slow spin, chosen by ear */
+enum { JAKE_FLYER_PLAYER = 1, JAKE_FLYER_RACE = 2 };
+static const struct { uint16_t sample, from, to, when; } g_flyer_pitches[] = {
+    { 0x03850 >> 3, 0x2E9, 0x80E, JAKE_FLYER_PLAYER },   /* player flying: Spike's -> Jake's */
+    { 0x03850 >> 3, 0x80E, 0x2E9, JAKE_FLYER_RACE },     /* race Jake flying: Jake's -> Spike's */
+    { 0x06970 >> 3, 0x297, 0x580, JAKE_FLYER_PLAYER },   /* player slow spin, chosen by ear */
 };
-/* The Super Hoop's spin-and-run whir plays one of these samples too (it
- * came out as Jake's flyer tone), so the player's rules only apply while
- * he holds the Sky Flyer (held gadget 0x800EC2D2 = 6). */
+/* The stock Super Hoop's spin-and-run whir is the same propeller loop at
+ * 0x80E, race Jake's flyer pitch (measured with the mod off), so the race
+ * rule only applies while race Jake has been seen in the last 30 seconds
+ * and the player is not holding the hoop (which can't be used in races).
+ * The player's rules only apply while he holds the Sky Flyer (held gadget
+ * 0x800EC2D2 = 6). */
 static const uint32_t JAKE_HELD_GADGET = 0x800EC2D2u;
-enum { JAKE_GADGET_SKY_FLYER = 6 };
+enum { JAKE_GADGET_HOOP = 4, JAKE_GADGET_SKY_FLYER = 6, JAKE_RACE_SEEN_FRAMES = 30 * 60 };
 static uint16_t g_flyer_written[SPU_VOICES];
 
 static void jake_flyer_pitch_vblank(void) {
-    const int holds_flyer = psx_mod_read_byte(JAKE_HELD_GADGET) == JAKE_GADGET_SKY_FLYER;
+    const uint32_t held = psx_mod_read_byte(JAKE_HELD_GADGET);
+    const int holds_flyer = held == JAKE_GADGET_SKY_FLYER;
+    const int in_race = held != JAKE_GADGET_HOOP && g_frame - g_jake_own_frame <= JAKE_RACE_SEEN_FRAMES;
     int voice;
     unsigned i;
     for (voice = 0; voice < SPU_VOICES; ++voice) {
@@ -2561,7 +2567,7 @@ static void jake_flyer_pitch_vblank(void) {
         g_flyer_written[voice] = 0u;
         for (i = 0; i < sizeof g_flyer_pitches / sizeof g_flyer_pitches[0]; ++i)
             if (g_flyer_pitches[i].sample == sample && g_flyer_pitches[i].from == pitch &&
-                (!g_flyer_pitches[i].player || holds_flyer)) {
+                (g_flyer_pitches[i].when == JAKE_FLYER_PLAYER ? holds_flyer : in_race)) {
                 psx_mod_write_half(base + 0x4u, g_flyer_pitches[i].to);
                 g_flyer_written[voice] = g_flyer_pitches[i].to;
                 break;
