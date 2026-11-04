@@ -345,6 +345,44 @@ static int jake_disc_piece(const JakeDiscFile* file, uint32_t offset, uint8_t* o
     return 1;
 }
 
+/*
+ * Spike's own L2 face (the one the HUD shows before it becomes Jake's),
+ * kept for the race select, where it stands in for the X of "Dimension X"
+ * on Spike's races. The HUD texture is a VRAM image in KKIIDDZZ.DAT: a
+ * rect (448,384, 64 halfwords x 112 rows) at user offset 0x11218, its raw
+ * texels after it; the face is 5 halfwords (18 texels and 2 clear) by 16
+ * rows from x 472. Its palette, the game's at (464,504), is at 0x11114.
+ */
+enum {
+    SPIKE_FACE_RECT = 0x11218, SPIKE_FACE_TEXELS = 0x11220, SPIKE_FACE_CLUT = 0x11114,
+    SPIKE_FACE_COLUMN = 24, SPIKE_FACE_ROW_HALFWORDS = 64,
+    SPIKE_FACE_W = 5, SPIKE_FACE_H = 16
+};
+static const uint8_t SPIKE_FACE_RECT_BYTES[8] = { 0xC0, 0x01, 0x80, 0x01, 0x40, 0x00, 0x70, 0x00 };
+static uint16_t g_spike_face[SPIKE_FACE_W * SPIKE_FACE_H], g_spike_face_clut[16];
+static uint8_t g_spike_face_ok;
+
+static void jake_load_spike_face(const JakeDiscFile* dat) {
+    uint8_t rect[8], row[SPIKE_FACE_W * 2], clut[32];
+    uint32_t y, x;
+    if (!jake_disc_piece(dat, SPIKE_FACE_RECT, rect, sizeof rect) ||
+        memcmp(rect, SPIKE_FACE_RECT_BYTES, sizeof rect) != 0 ||
+        !jake_disc_piece(dat, SPIKE_FACE_CLUT, clut, sizeof clut)) {
+        fprintf(stderr, "play-as-jake: Spike's face icon was not found on this disc\n");
+        return;
+    }
+    for (y = 0; y < SPIKE_FACE_H; ++y) {
+        if (!jake_disc_piece(dat, SPIKE_FACE_TEXELS + (y * SPIKE_FACE_ROW_HALFWORDS + SPIKE_FACE_COLUMN) * 2u,
+                             row, sizeof row))
+            return;
+        for (x = 0; x < SPIKE_FACE_W; ++x)
+            g_spike_face[y * SPIKE_FACE_W + x] = (uint16_t)(row[x * 2] | (row[x * 2 + 1] << 8));
+    }
+    for (x = 0; x < 16; ++x)
+        g_spike_face_clut[x] = (uint16_t)(clut[x * 2] | (clut[x * 2 + 1] << 8));
+    g_spike_face_ok = 1u;
+}
+
 static void jake_load_disc(const JakeDiscFile* dat) {
     uint8_t clut[32], packed[0x400];
     int k, look;
@@ -371,6 +409,7 @@ static void jake_load_disc(const JakeDiscFile* dat) {
     g_disc_ok = g_look_ok[JAKE_EVIL];
     if (!g_look_ok[g_look])
         g_look = JAKE_EVIL;
+    jake_load_spike_face(dat);
 }
 
 /* ---- Voice ------------------------------------------------------------- */
@@ -1404,6 +1443,93 @@ static void jake_rename_races(void) {
     }
 }
 
+static void jake_link_packet(uint32_t entry, const uint32_t* words, uint32_t count);
+
+/*
+ * On Spike's races the race select's world line reads "Dimension" and then
+ * Spike's face for its X. The overlay is told by its name lookup
+ * (0x801387FC) being loaded; the selected level is the byte at 0x80139978 +
+ * [0x80139BCC] + [0x80139BC4] * 4 (6 Stadium Attack, 13 Gladiator Attack).
+ * Every letter is its own packet (tag of 5: draw mode E1000226, then a
+ * 16x16 sprite); the world line's X is the one on palette 0x3FA3 at uv
+ * 0x2070 above y 56. Before the frame is drawn that packet is pointed at
+ * the face, uploaded with its palette to VRAM free on this screen
+ * ((960,496) and (1008,494)), drawn solid instead of see-through.
+ */
+enum {
+    SPIKE_FACE_VRAM_X = 960, SPIKE_FACE_VRAM_Y = 496,      /* page 0x1F, v 240 */
+    SPIKE_FACE_CLUT_X = 1008, SPIKE_FACE_CLUT_Y = 494,
+    RACE_SELECT_X_CLUT = 0x3FA3, RACE_SELECT_X_UV = 0x2070, RACE_SELECT_WORLD_LINE_Y = 56,
+    RACE_SELECT_WALK_MAX = 6000
+};
+static const uint32_t JAKE_RACE_SELECT_LEVEL_TABLE = 0x80139978u;
+static const uint32_t JAKE_RACE_SELECT_ROW = 0x80139BC4u, JAKE_RACE_SELECT_BASE = 0x80139BCCu;
+
+static int jake_on_race_select(void) {
+    return psx_mod_read_word(0x801387FCu) == 0x18A00009u &&   /* blez a1 (name lookup) */
+           psx_mod_read_word(0x80138804u) == 0x90820000u;     /* lbu v0,0(a0) */
+}
+
+static int jake_spike_race_selected(void) {
+    const uint32_t row = psx_mod_read_word(JAKE_RACE_SELECT_ROW);
+    const uint32_t base = psx_mod_read_word(JAKE_RACE_SELECT_BASE);
+    uint32_t level;
+    if (row >= 32u || base >= 0x100u)
+        return 0;
+    level = psx_mod_read_byte(JAKE_RACE_SELECT_LEVEL_TABLE + base + row * 4u);
+    return level == 6u || level == 13u;
+}
+
+/* Linked with the face (periodic, far end of the scene's table). */
+static void jake_upload_spike_face(uint32_t far_entry) {
+    uint32_t words[3 + SPIKE_FACE_W * SPIKE_FACE_H / 2 + 8];
+    uint32_t k;
+    if (!g_spike_face_ok || !jake_on_race_select())
+        return;
+    words[0] = 0xA0000000u;
+    words[1] = ((uint32_t)SPIKE_FACE_VRAM_Y << 16) | SPIKE_FACE_VRAM_X;
+    words[2] = ((uint32_t)SPIKE_FACE_H << 16) | SPIKE_FACE_W;
+    for (k = 0; k < SPIKE_FACE_W * SPIKE_FACE_H; k += 2)
+        words[3 + k / 2] = g_spike_face[k] | ((uint32_t)g_spike_face[k + 1] << 16);
+    jake_link_packet(far_entry, words, 3u + SPIKE_FACE_W * SPIKE_FACE_H / 2u);
+    words[0] = 0xA0000000u;
+    words[1] = ((uint32_t)SPIKE_FACE_CLUT_Y << 16) | SPIKE_FACE_CLUT_X;
+    words[2] = (1u << 16) | 16u;
+    for (k = 0; k < 16; k += 2)
+        words[3 + k / 2] = g_spike_face_clut[k] | ((uint32_t)g_spike_face_clut[k + 1] << 16);
+    jake_link_packet(far_entry, words, 3u + 8u);
+}
+
+/* At every DrawOTag (a0 = the table's far end) on the race select. */
+static void jake_spike_face_for_x(uint32_t start) {
+    uint32_t at = start & 0x00FFFFFFu;
+    int n;
+    if (!g_spike_face_ok || !jake_on_race_select() || !jake_spike_race_selected())
+        return;
+    for (n = 0; n < RACE_SELECT_WALK_MAX && at != 0x00FFFFFFu && at != 0u; ++n) {
+        const uint32_t addr = 0x80000000u | at;
+        const uint32_t tag = psx_mod_read_word(addr);
+        if ((tag >> 24) == 5u) {
+            const uint32_t mode = psx_mod_read_word(addr + 4u);
+            const uint32_t sprite = psx_mod_read_word(addr + 8u);
+            const uint32_t xy = psx_mod_read_word(addr + 12u);
+            const uint32_t cuv = psx_mod_read_word(addr + 16u);
+            const int32_t y = (int16_t)(xy >> 16), x = (int16_t)(xy & 0xFFFFu);
+            if ((mode >> 24) == 0xE1u && (sprite >> 24) >= 0x64u && (sprite >> 24) <= 0x67u &&
+                cuv == (((uint32_t)RACE_SELECT_X_CLUT << 16) | RACE_SELECT_X_UV) &&
+                y < RACE_SELECT_WORLD_LINE_Y) {
+                psx_mod_write_word(addr + 4u, (mode & 0xFFFFFE00u) | 0x200u | 0x1Fu);  /* page (960,256), 4-bit */
+                psx_mod_write_word(addr + 8u, 0x65808080u);                            /* raw, solid */
+                psx_mod_write_word(addr + 12u, ((uint32_t)(uint16_t)(y - 1) << 16) | (uint16_t)(x - 1));
+                psx_mod_write_word(addr + 16u, ((uint32_t)((SPIKE_FACE_CLUT_Y << 6) | (SPIKE_FACE_CLUT_X >> 4)) << 16) |
+                                                   ((uint32_t)(SPIKE_FACE_VRAM_Y - 256) << 8));
+                psx_mod_write_word(addr + 20u, ((uint32_t)SPIKE_FACE_H << 16) | (SPIKE_FACE_W * 4u));
+            }
+        }
+        at = tag & 0x00FFFFFFu;
+    }
+}
+
 static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
     (void)address;
     if (g_enabled && cpu->gpr[31] == JAKE_CLUB_HALO_RETURN && cpu->gpr[7] == JAKE_CLUB_HALO_STOCK)
@@ -1614,6 +1740,7 @@ static void jake_upload_face(uint32_t table) {
             words[3 + k / 2] = swap->stock[k] | ((uint32_t)swap->stock[k + 1] << 16);
         jake_link_packet(far_entry, words, 3u + swap->count / 2u);
     }
+    jake_upload_spike_face(far_entry);
     words[0] = 0xA0000000u;
     words[1] = ((uint32_t)JAKE_CLUT_Y << 16) | JAKE_CLUT_X;
     words[2] = (1u << 16) | 16u;
@@ -2674,6 +2801,8 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     if (g_enabled && g_jake_mesh_ready)
         jake_save_looks_tick();
     jake_green_flyers();
+    if (g_enabled)
+        jake_spike_face_for_x(cpu->gpr[4]);
     /* Keep the face in VRAM (level loads may write over that strip). */
     for (index = 0u; index < 2u; ++index) {
         const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;

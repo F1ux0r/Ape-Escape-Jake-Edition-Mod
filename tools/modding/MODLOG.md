@@ -370,3 +370,18 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   0x8009B33C for both). JAKE_GREEN_FLYER_MODELS = blades (504 -> green copy 976,494) + disc (470 -> 992,494); any
   textured poly (op & 0xE4 == 0x24 family, palette at +14) on the model's violet palette is switched. Verified airborne
   frames on menu slot 4: CPU disc green, player blades violet.
+
+## 2026-11-03 Jake: race select - Spike Attack / Spike Attack 2, Spike's face for the X
+- Text code (race select / gadget help): capitals 0x10+n, lower 0x30+n, space 0xFF, digits 0x6A+n ("360" = 6D 7A? 6A -
+  only 0x6C '2' and 0x6D '3' confirmed on screen). Level names = one zero-terminated list (base 0x801399E8, second copy
+  0x8013ADF0) read by 0x801387FC (count terminators) and centred by width (0x8013882C); world names separate (0x80137ED8).
+  Stadium Attack -> "Spike Attack", Gladiator Attack -> "Spike Attack 2": list rewritten, rest moved up, spare bytes as
+  terminators after the last name. Checked every level name either side on screen.
+- Selected level = byte 0x80139978 + [0x80139BCC] + [0x80139BC4]*4 (6 Stadium, 13 Gladiator). Race-select overlay told by
+  0x801387FC == 0x18A00009. Title letters: per-letter packets (tag 5: E1000226 + 0x67 16x16 sprite, page 0x26); title
+  line palette 0x3F63, world line 0x3FA3; the world line's X = uv 0x2070. Not in the main OT (own table); walked from
+  DrawOTag's a0.
+- Spike's original L2 face: KKIIDDZZ.DAT rect at 0x11218 = (448,384, 64x112 halfwords), raw texels from 0x11220; face =
+  5 halfwords x 16 rows from column 24; palette (game's 464,504) at 0x11114. Read at startup (no game art in the repo),
+  uploaded on the race select to (960,496) + palette (1008,494) (free there), X packet repointed (page 0x1F, raw 0x65,
+  20x16, x-1/y-1) only on levels 6 and 13. Peak Point Matrix (also Dimension X) keeps its X - verified.
