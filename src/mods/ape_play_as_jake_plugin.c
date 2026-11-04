@@ -1218,6 +1218,86 @@ static void jake_purple_trail(void) {
     g_trail_count = 0;
 }
 
+/*
+ * The race's other Sky Flyer stays green. The propeller (model entry
+ * 0x800EC0C0, 8 blade quads textured with palette 944,504) is one model
+ * drawn by 0x800161C0 (a0 = model entry) for every holder, so the violet
+ * palette above reaches whoever else holds one. The player's flyer is drawn
+ * from his handler (returning to 0x8009B33C); the CPU racer's from
+ * 0x80039E84 (returning to 0x80039E8C), found by logging every caller of a
+ * propeller draw in the Jake Attack race. The gadget menu draws its own
+ * from 0x80099C94, so it keeps the violet. Each CPU draw notes where its packets
+ * start (the packet pointer) and end (the pointer at the next model draw),
+ * and before the frame goes to the GPU its blade quads are pointed at a copy
+ * of the stock green palette kept at (976,494), which is free (the title
+ * atlas only uses (960,494)).
+ */
+static const uint32_t JAKE_MODEL_DRAW_FUNCTION = 0x800161C0u;
+static const uint32_t JAKE_FLYER_PROP_ENTRY = 0x800EC0C0u;
+static const uint32_t JAKE_GREEN_FLYER_RETURNS[] = { 0x80039E8Cu };
+enum {
+    JAKE_FLYER_TEX_CLUT = (504 << 6) | (944 >> 4),
+    JAKE_GREEN_FLYER_X = 976, JAKE_GREEN_FLYER_Y = 494,
+    JAKE_GREEN_FLYER_CLUT = (JAKE_GREEN_FLYER_Y << 6) | (JAKE_GREEN_FLYER_X >> 4),
+    JAKE_GREEN_FLYER_MAX = 4, JAKE_GREEN_FLYER_SCAN = 64
+};
+static uint32_t g_green_start[JAKE_GREEN_FLYER_MAX], g_green_end[JAKE_GREEN_FLYER_MAX];
+static uint32_t g_green_count;
+static uint8_t g_force_upload;     /* re-upload palettes and face next frame */
+static int g_green_open;          /* the last noted draw has no end yet */
+static uint8_t g_green_flyer_seen; /* keep the green copy uploaded */
+
+static void jake_close_green_draw(void) {
+    if (g_green_open) {
+        g_green_end[g_green_count - 1u] = psx_mod_read_word(JAKE_PACKET_POINTER);
+        g_green_open = 0;
+    }
+}
+
+static void jake_model_draw_entry(struct CPUState* cpu, uint32_t address) {
+    const uint32_t entry = cpu->gpr[4], ra = cpu->gpr[31];
+    uint32_t i;
+    (void)address;
+    if (!g_enabled)
+        return;
+    jake_close_green_draw();
+    if (!jake_ram_pointer(entry) ||
+        psx_mod_read_word(entry + 8u) != psx_mod_read_word(JAKE_FLYER_PROP_ENTRY + 8u))
+        return;
+    for (i = 0; i < sizeof JAKE_GREEN_FLYER_RETURNS / sizeof JAKE_GREEN_FLYER_RETURNS[0]; ++i)
+        if (ra == JAKE_GREEN_FLYER_RETURNS[i])
+            break;
+    if (i == sizeof JAKE_GREEN_FLYER_RETURNS / sizeof JAKE_GREEN_FLYER_RETURNS[0] ||
+        g_green_count >= JAKE_GREEN_FLYER_MAX)
+        return;
+    if (!g_green_flyer_seen) {
+        g_green_flyer_seen = 1u;
+        g_force_upload = 1u;
+    }
+    g_green_start[g_green_count++] = psx_mod_read_word(JAKE_PACKET_POINTER);
+    g_green_open = 1;
+}
+
+/* At DrawOTag: the noted draws' blade quads (op 0x3C-0x3F, 13 words, the
+ * palette in the third word's high half) go to the green copy. */
+static void jake_green_flyers(void) {
+    uint32_t d, n;
+    jake_close_green_draw();
+    for (d = 0; d < g_green_count; ++d) {
+        uint32_t p = g_green_start[d];
+        for (n = 0; n < JAKE_GREEN_FLYER_SCAN && p < g_green_end[d] && jake_ram_pointer(p); ++n) {
+            const uint32_t words = psx_mod_read_byte(p + 3u);
+            if (words == 0u || words > 16u)
+                break;
+            if (words == 12u && (psx_mod_read_byte(p + 7u) & 0xFCu) == 0x3Cu &&
+                psx_mod_read_half(p + 14u) == JAKE_FLYER_TEX_CLUT)
+                psx_mod_write_half(p + 14u, JAKE_GREEN_FLYER_CLUT);
+            p += 4u + words * 4u;
+        }
+    }
+    g_green_count = 0;
+}
+
 static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
     (void)address;
     if (g_enabled && cpu->gpr[31] == JAKE_CLUB_HALO_RETURN && cpu->gpr[7] == JAKE_CLUB_HALO_STOCK)
@@ -1409,6 +1489,18 @@ static void jake_upload_face(uint32_t table) {
         words[2] = (1u << 16) | swap->count;
         for (k = 0; k < swap->count; k += 2)
             words[3 + k / 2] = swap->ours[k] | ((uint32_t)swap->ours[k + 1] << 16);
+        jake_link_packet(far_entry, words, 3u + swap->count / 2u);
+    }
+    /* The stock green Sky Flyer palette, for the race's other flyer. */
+    for (row = 0; g_green_flyer_seen && row < JAKE_CLUT_SWAP_COUNT; ++row) {
+        const JakeClutSwap* swap = &JAKE_CLUT_SWAPS[row];
+        if (swap->x != 944u || swap->y != 504u)
+            continue;
+        words[0] = 0xA0000000u;
+        words[1] = ((uint32_t)JAKE_GREEN_FLYER_Y << 16) | JAKE_GREEN_FLYER_X;
+        words[2] = (1u << 16) | swap->count;
+        for (k = 0; k < swap->count; k += 2)
+            words[3 + k / 2] = swap->stock[k] | ((uint32_t)swap->stock[k + 1] << 16);
         jake_link_packet(far_entry, words, 3u + swap->count / 2u);
     }
     words[0] = 0xA0000000u;
@@ -1843,6 +1935,7 @@ static void jake_transform_entry(struct CPUState* cpu, uint32_t address) {
     const uint32_t object = cpu->gpr[4];
     uint32_t header, matrices;
     (void)address;
+    jake_close_green_draw();
 
     if (!g_enabled || jake_is_swapped(object))
         return;
@@ -2021,7 +2114,6 @@ enum {
     TITLE_QUADS = 4
 };
 static uint32_t g_title_quads[2];
-static uint8_t g_force_upload;
 /* The attract demo plays a level with the title code still loaded; the
  * level's own Spike (never drawn on the title) gives it away. */
 enum { EDITION_LEVEL_FRAMES = 60 };
@@ -2470,6 +2562,7 @@ static void jake_draw_ot_entry(struct CPUState* cpu, uint32_t address) {
     jake_purple_trail();
     if (g_enabled && g_jake_mesh_ready)
         jake_save_looks_tick();
+    jake_green_flyers();
     /* Keep the face in VRAM (level loads may write over that strip). */
     for (index = 0u; index < 2u; ++index) {
         const uint32_t table = JAKE_ORDERING_TABLE + JAKE_ORDERING_TABLE_STRIDE * index;
@@ -2546,4 +2639,6 @@ PSX_MOD_CONSTRUCTOR(ape_register_play_as_jake_plugin) {
         "ape.characters.play-as-jake", JAKE_GLOW_BEAM_FUNCTION, jake_glow_beam_entry);
     (void)psx_mod_register_function_entry_plugin(
         "ape.characters.play-as-jake", JAKE_TRAIL_FUNCTION, jake_trail_entry);
+    (void)psx_mod_register_function_entry_plugin(
+        "ape.characters.play-as-jake", JAKE_MODEL_DRAW_FUNCTION, jake_model_draw_entry);
 }

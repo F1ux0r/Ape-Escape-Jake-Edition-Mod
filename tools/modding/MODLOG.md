@@ -352,3 +352,16 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   remembers the pitch written so a swapped value isn't swapped back. Verified live (spu_voices), user approved by ear.
 - Savestates only load once the plugin's lazy guest allocations match (header cookie = mod memory used): after a
   rebuild, boot and reach the Jake Attack race selection before loading the race states.
+
+## 2026-11-03 Jake: race CPU's Sky Flyer stays green
+- Propeller = one model (entry 0x800EC0C0, polys 0x8010862C; 8 blade quads op 0x3E, palette 944,504) drawn by
+  0x800161C0 (a0 = model entry) for every holder, so the violet 944,504 swap reached the race CPU (wears Spike).
+  Callers logged in the race: player 0x8009B33C (Sky Flyer handler), race CPU 0x80039E8C (from 0x80039E84).
+  Gadget menu draws from 0x80099C94 (static scan), so it stays violet (not checked in game).
+- New hook 0x800161C0 (game.toml + plugin; DuckStation build picks it up, Jake patch now 7 hooks). CPU draws note
+  packet pointer start/end (end = pointer at the next 0x800161C0/0x80016A60 entry); at DrawOTag their 0x3C-0x3F
+  quads with clut 0x7E3B get clut 0x7BBD = stock green copy uploaded at (976,494) (free: title atlas palette is
+  only (960,494)). Verified with gpu_frame_dump + present_shot on menu slot 4 (debug 3: CPU about to fly, paused).
+- Tools: present_shot (debug) captures the game frame even when the window is covered; capture_game_window.ps1
+  grabs whatever is on screen. port.py patches the jake_purple_trail/save_looks_tick lines verbatim - keep them
+  adjacent.
