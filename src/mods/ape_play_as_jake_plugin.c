@@ -84,10 +84,10 @@ enum {
  * 0x64..0x67 sprite: colour, xy, clut<<16 | uv, size) by page, uv and
  * palette and redraws it from new_uv, with a recoloured copy of the palette
  * kept in free VRAM (clut_x/clut_y; 0 = keep the stock palette):
- *  - L2 face (page 0x17): hair red -> Jake's purple.
+ *  - L2 face (page 0x17): hair red -> Jake's (purple here, blue at upload).
  *  - pause menu lives shirt (page 0x4F): red -> his navy.
  *  - race map heads (page 0x26, palette 0x3F9B; Spike at uv F860, Jake at
- *    F868): swapped like the bodies, Jake's blue hair made purple.
+ *    F868): swapped like the bodies, Jake's hair kept blue.
  *  - health flame behind the cookies (page 0x1A, palette 0x7A2B): its
  *    yellow-to-red becomes turquoise-to-purple, shade for shade (same
  *    brightness steps, same semi-transparency bits). Matched at any uv.
@@ -235,7 +235,7 @@ static uint8_t g_disc_ok;
  * Two looks: every boot starts as NORMAL, and L1 on the title screen
  * switches for that session (nothing is saved). EVIL (shown as
  * BRAINWASHED) is Jake as he races you (the mesh above, red
- * slanted eyes, purple hair on the HUD), NORMAL is Jake before Specter gets
+ * slanted eyes; his hair made blue, jake_blue_hair), NORMAL is Jake before Specter gets
  * him, as in the opening cutscene (blue hair, big brown eyes). The normal
  * mesh is the intro's (USA disc 0x008AE9D0; its face quads' uvs are already
  * relative to the 64x64 face block, so the same retarget works), and its
@@ -383,6 +383,28 @@ static void jake_load_spike_face(const JakeDiscFile* dat) {
     g_spike_face_ok = 1u;
 }
 
+/*
+ * The race mesh (the BRAINWASHED look) has purple hair; Jake's is blue, as
+ * in the NORMAL look. Its colours used only by the head and the hair tail
+ * (parts 3, 16, 17) that are purple (blue above red above green) get red
+ * and green swapped, the HUD's rule; the purples on his arms and legs
+ * (colours 26 and 28) are his clothes and stay.
+ */
+static const uint8_t JAKE_EVIL_HAIR_COLOURS[] = { 6, 11, 14, 17, 18, 19, 21, 23, 24, 25 };
+
+static void jake_blue_hair(uint8_t* mesh) {
+    const uint32_t count = (uint32_t)(mesh[8] | (mesh[9] << 8));
+    uint32_t i;
+    for (i = 0; i < sizeof JAKE_EVIL_HAIR_COLOURS; ++i) {
+        uint8_t* c = mesh + 0x0Cu + JAKE_EVIL_HAIR_COLOURS[i] * 4u;
+        const uint8_t r = c[0], g = c[1], b = c[2];
+        if (JAKE_EVIL_HAIR_COLOURS[i] < count && b > r && r > g) {
+            c[0] = g;
+            c[1] = r;
+        }
+    }
+}
+
 static void jake_load_disc(const JakeDiscFile* dat) {
     uint8_t clut[32], packed[0x400];
     int k, look;
@@ -398,6 +420,8 @@ static void jake_load_disc(const JakeDiscFile* dat) {
             for (k = 0; k < 16; ++k)
                 g_look_clut[look][k] = (uint16_t)(clut[k * 2] | (clut[k * 2 + 1] << 8));
             jake_unpack_face(packed, JAKE_LOOK_DISC[look].image_size, g_look_texels[look]);
+            if (look == JAKE_EVIL)
+                jake_blue_hair(g_look_mesh[look]);
             g_look_ok[look] = 1u;
         } else {
             fprintf(stderr, "play-as-jake: Jake's %s look was not found on this disc\n",
@@ -1736,11 +1760,11 @@ static void jake_link_packet(uint32_t entry, const uint32_t* words, uint32_t cou
     psx_mod_write_word(entry, (old & 0xFF000000u) | (packet & 0x00FFFFFFu));
 }
 
-/* The HUD's purple hair (blue above red above green) turns blue for the
- * NORMAL look by swapping red and green. */
+/* The HUD's purple hair (blue above red above green) turns blue, on both
+ * looks, by swapping red and green: Jake's hair is blue. */
 static uint16_t jake_look_colour(uint16_t c) {
     const uint16_t r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
-    if (g_look != JAKE_NORMAL || !(b > r && r > g + 1u))
+    if (!(b > r && r > g + 1u))
         return c;
     return (uint16_t)((c & 0x8000u) | g | (r << 5) | (b << 10));
 }

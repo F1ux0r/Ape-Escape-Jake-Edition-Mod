@@ -407,3 +407,10 @@ Spike. Look only: skeleton, animation, controls, AI unchanged.
   0x7E). jake_swap_result_lines writes the two win lines in each other's place (same total bytes). User won a Spike
   race: screen said "Jake Wins!".
 - Windows Smart App Control blocked a fresh unsigned build (reputation) on 2026-11-03; the user turned SAC off.
+
+## 2026-11-03 Jake: brainwashed hair blue
+- BRAINWASHED (race) mesh colours mapped to parts by poly: colours used only by head/hair tail (parts 3, 16, 17) and
+  purple = 6, 11, 14, 17, 18, 19, 21, 23, 24, 25 -> red/green swapped at disc load (jake_blue_hair), the HUD's rule;
+  26 and 28 (arms/legs) are clothes and stay. jake_look_colour (HUD palettes) now turns purple hair blue on both looks.
+- Gotcha: a savestate brings back the mod memory copy of the mesh from when it was made, so states from an older build
+  show the old colours; make new states after a colour change (user's call: no refresh code).
