@@ -1322,6 +1322,88 @@ static void jake_green_flyers(void) {
     g_green_count = 0;
 }
 
+/*
+ * Race names. Jake's races are Spike's now: "Stadium Attack" (his first)
+ * reads "Spike Attack" and "Gladiator Attack" (his second) "Spike Attack 2".
+ * Level names are one list of zero-terminated strings; the race-select
+ * overlay finds a name by counting terminators from the list start
+ * (0x801387FC, base 0x801399E8) and centres it by its measured width, so the
+ * list is rewritten with the shorter names, the rest moved up, and the spare
+ * bytes added as terminators after the last name (the world names after it
+ * have their own base, 0x80137ED8). Text code: capitals 0x10 + n, lower case
+ * 0x30 + n, space 0xFF, digits from 0x6A (the club's "360" and the
+ * slingshot's "L2"). Rewritten whenever the overlay holds the stock list
+ * (it starts "Fossil Field"); the overlay has two copies of it.
+ */
+static const uint32_t JAKE_LEVEL_NAME_LISTS[] = { 0x801399E8u, 0x8013ADF0u };
+static const uint8_t JAKE_FOSSIL_FIELD[] = {
+    0x15, 0x3E, 0x42, 0x42, 0x38, 0x3B, 0xFF, 0x15, 0x38, 0x34, 0x3B, 0x33, 0x00
+};
+static const uint8_t JAKE_STADIUM_ATTACK[] = {
+    0x22, 0x43, 0x30, 0x33, 0x38, 0x44, 0x3C, 0xFF, 0x10, 0x43, 0x43, 0x30, 0x32, 0x3A, 0x00
+};
+static const uint8_t JAKE_GLADIATOR_ATTACK[] = {
+    0x16, 0x3B, 0x30, 0x33, 0x38, 0x30, 0x43, 0x3E, 0x41, 0xFF,
+    0x10, 0x43, 0x43, 0x30, 0x32, 0x3A, 0x00
+};
+static const uint8_t JAKE_SPIKE_ATTACK[] = {
+    0x22, 0x3F, 0x38, 0x3A, 0x34, 0xFF, 0x10, 0x43, 0x43, 0x30, 0x32, 0x3A, 0x00
+};
+static const uint8_t JAKE_SPIKE_ATTACK_2[] = {
+    0x22, 0x3F, 0x38, 0x3A, 0x34, 0xFF, 0x10, 0x43, 0x43, 0x30, 0x32, 0x3A, 0xFF, 0x6C, 0x00
+};
+static const struct { const uint8_t* from; uint32_t from_size; const uint8_t* to; uint32_t to_size; }
+JAKE_RACE_RENAMES[] = {
+    { JAKE_STADIUM_ATTACK, sizeof JAKE_STADIUM_ATTACK, JAKE_SPIKE_ATTACK, sizeof JAKE_SPIKE_ATTACK },
+    { JAKE_GLADIATOR_ATTACK, sizeof JAKE_GLADIATOR_ATTACK, JAKE_SPIKE_ATTACK_2, sizeof JAKE_SPIKE_ATTACK_2 },
+};
+enum { JAKE_NAME_LIST_MAX = 640 };
+
+static void jake_rename_races(void) {
+    static uint8_t list[JAKE_NAME_LIST_MAX], out[JAKE_NAME_LIST_MAX];   /* off the PS1's small stack */
+    uint32_t s, k, size, in, o, r;
+    for (s = 0; s < sizeof JAKE_LEVEL_NAME_LISTS / sizeof JAKE_LEVEL_NAME_LISTS[0]; ++s) {
+        const uint32_t at = JAKE_LEVEL_NAME_LISTS[s];
+        int renamed = 0;
+        for (k = 0; k < sizeof JAKE_FOSSIL_FIELD; ++k)
+            if (psx_mod_read_byte(at + k) != JAKE_FOSSIL_FIELD[k])
+                break;
+        if (k != sizeof JAKE_FOSSIL_FIELD)
+            continue;
+        /* The whole list, through its end (two terminators). */
+        for (size = 0; size < JAKE_NAME_LIST_MAX; ++size) {
+            list[size] = psx_mod_read_byte(at + size);
+            if (list[size] == 0u && size > 0u && list[size - 1u] == 0u)
+                break;
+        }
+        if (size >= JAKE_NAME_LIST_MAX)
+            continue;   /* no list end found: leave it alone */
+        ++size;
+        for (in = 0, o = 0; in < size;) {
+            for (r = 0; r < sizeof JAKE_RACE_RENAMES / sizeof JAKE_RACE_RENAMES[0]; ++r)
+                if (in + JAKE_RACE_RENAMES[r].from_size <= size &&
+                    memcmp(list + in, JAKE_RACE_RENAMES[r].from, JAKE_RACE_RENAMES[r].from_size) == 0 &&
+                    (in == 0u || list[in - 1u] == 0u))
+                    break;
+            if (r < sizeof JAKE_RACE_RENAMES / sizeof JAKE_RACE_RENAMES[0]) {
+                memcpy(out + o, JAKE_RACE_RENAMES[r].to, JAKE_RACE_RENAMES[r].to_size);
+                o += JAKE_RACE_RENAMES[r].to_size;
+                in += JAKE_RACE_RENAMES[r].from_size;
+                renamed = 1;
+            } else {
+                out[o++] = list[in++];
+            }
+        }
+        if (!renamed)
+            continue;   /* already done */
+        while (o < size)
+            out[o++] = 0u;
+        for (k = 0; k < size; ++k)
+            if (out[k] != list[k])
+                psx_mod_write_byte(at + k, out[k]);
+    }
+}
+
 static void jake_glow_beam_entry(struct CPUState* cpu, uint32_t address) {
     (void)address;
     if (g_enabled && cpu->gpr[31] == JAKE_CLUB_HALO_RETURN && cpu->gpr[7] == JAKE_CLUB_HALO_STOCK)
@@ -1349,6 +1431,7 @@ static void jake_vblank(void) {
     jake_spawn_vblank();
     jake_click_vblank();
     jake_flyer_pitch_vblank();
+    jake_rename_races();
 }
 
 /* ---- Mesh -------------------------------------------------------------- */
